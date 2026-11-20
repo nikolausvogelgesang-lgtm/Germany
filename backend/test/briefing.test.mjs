@@ -46,6 +46,7 @@ test('energy listener skips a soybean-led mixed commodity article when oil stori
   const asOf = '2026-11-19T23:59:59Z';
   const groups = [
     [article('mixed', 'Sojabohnenpreis: Brent-Öl prallt von Unterstützung ab', 'Sojabohnen und Brent.', '2026-11-18T12:00:00Z', 'de')],
+    [article('mixed-news', 'Abendbericht: Anthropic steigt, Gold und Öl fallen', 'Anthropic und Öl.', '2026-11-18T12:02:00Z', 'de')],
     [article('oil', 'Brent-Öl unter Druck wegen Lagerbeständen', 'Brent-Öl fällt.', '2026-11-18T11:00:00Z', 'de')],
   ];
   const chosen = selectArticles(groups, { language: 'de', topics: ['Energie', 'Öl'], depth: 'brief', maxMinutes: 2 }, asOf);
@@ -75,6 +76,13 @@ test('Dutch fallback attributes the source without duplicate punctuation', async
   const source = article('nl', 'Stijgt Brent morgen?', 'Brent blijft onzeker.', '2026-11-18T12:00:00Z', 'nl');
   const result = await makeScript([[source]], { language: 'nl', topics: ['Brent'], maxMinutes: 1 }, '2026-11-19T23:59:59Z', '');
   assert.match(result.segments[1].text, /meldt: „Stijgt Brent morgen\?”$/);
+});
+
+test('brief editions cap the live selection at three stories without reducing dataset ingestion', async () => {
+  const groups = Array.from({ length: 5 }, (_, index) => [article(`story-${index}`, `Oil story ${index}`,
+    `Oil story ${index} happened.`, `2026-11-18T12:0${index}:00Z`)]);
+  const selected = selectArticles(groups, { language: 'en', topics: ['Oil'], depth: 'brief', maxMinutes: 2 }, '2026-11-19T23:59:59Z');
+  assert.equal(selected.length, 3);
 });
 
 test('model output is accepted only when its quote supports the numeric claim', async () => {
@@ -223,10 +231,12 @@ test('a successful retry reports generator and verifier tokens from both attempt
   const second = article('ai', 'Cloud grows', 'AI cloud revenue grew rapidly this year.', '2026-11-18T12:01:00Z');
   const originalFetch = globalThis.fetch;
   let attempts = 0;
+  const requestedModels = [];
   try {
     globalThis.fetch = async (_url, options) => {
       const request = JSON.parse(options.body);
       if (request.text.format.name === 'claim_verdicts') return approveClaims(request);
+      requestedModels.push(request.model);
       attempts++;
       const segments = [{ text: 'The euro fell against the dollar.', articleId: 'fx', evidenceQuote: 'The euro fell against the dollar.' }];
       if (attempts === 2) segments.push({ text: 'AI cloud revenue grew rapidly this year.', articleId: 'ai', evidenceQuote: 'AI cloud revenue grew rapidly this year.' });
@@ -235,9 +245,11 @@ test('a successful retry reports generator and verifier tokens from both attempt
     const result = await makeScript([[first], [second]], { language: 'en', topics: [], maxMinutes: 2 }, '2026-11-19T23:59:59Z', 'fake-key');
     assert.equal(result.generationMode, 'source-checked-model');
     assert.equal(attempts, 2);
+    assert.deepEqual(requestedModels, [process.env.OPENAI_MODEL || 'gpt-5.4-mini', process.env.OPENAI_REPAIR_MODEL || 'gpt-5.4']);
     assert.deepEqual(result.usage, {
       modelInputTokens: 4, modelOutputTokens: 4,
       verifierInputTokens: 2, verifierOutputTokens: 2,
+      repairInputTokens: 1, repairOutputTokens: 1,
     });
   } finally { globalThis.fetch = originalFetch; }
 });
