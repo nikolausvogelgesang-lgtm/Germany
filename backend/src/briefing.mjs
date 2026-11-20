@@ -51,6 +51,9 @@ function addIndependentCoverage(groups, primaries, asOf) {
 const NUMBER = /(?<![a-z0-9])(?:[$€£]\s*)?\d+(?:[.,]\d+)*(?:\s?(?:%|percentage points?|prozentpunkte?|procentpunten?|basis points?|basispunkte?|basispunten?|percent|prozent|procent|millionen?|miljoen|milliarden?|miljard|billion|trillion))?(?:\s*[$€£])?/gi;
 const normalized = (text) => text.toLowerCase().replace(/\s+/g, ' ').trim();
 const quoteMatchText = (text) => text.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+// A concrete product claim cannot borrow this detail from elsewhere in the article
+// while citing a passage about another part of the story.
+const AI_INFRASTRUCTURE = /\bai[\s-]?(?:infrastructure|infrastructuur|infrastruktur)\b/iu;
 const numericExpressions = (text) => (text.match(NUMBER) ?? []).map((value) => {
   const currency = value.match(/[$€£]/)?.[0] ?? '';
   const unit = normalized(value).replace(/[$€£]/g, '').trim()
@@ -74,6 +77,7 @@ function modelSegmentFailure(candidate, article, listener) {
   if (quote.split(/\s+/).length < Math.max(6, Math.ceil(claim.split(/\s+/).length / 2))) return 'insufficient_evidence_quote';
   const excerpt = quoteMatchText(quote);
   if (!quoteMatchText(article.text.slice(0, 1800)).includes(excerpt)) return 'quote_not_in_source';
+  if (AI_INFRASTRUCTURE.test(claim) && !AI_INFRASTRUCTURE.test(quote)) return 'unsupported_specific_concept';
   const claimNumbers = numericExpressions(claim);
   const quoteNumbers = new Set(numericExpressions(quote));
   if (!claimNumbers.every((number) => quoteNumbers.has(number))) return 'number_or_unit_mismatch';
@@ -82,6 +86,43 @@ function modelSegmentFailure(candidate, article, listener) {
 
 export function validateModelSegment(candidate, article, listener) {
   return modelSegmentFailure(candidate, article, listener) === null;
+}
+
+async function verifyQuotedClaims(factCards, apiKey) {
+  const claims = factCards.map((card) => ({
+    id: card.factId, claim: card.spokenText, quote: card.evidenceQuote,
+  }));
+  const verdict = {
+    type: 'object', additionalProperties: false, required: ['id', 'supported'],
+    properties: { id: { type: 'string' }, supported: { type: 'boolean' } },
+  };
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
+      instructions: 'You are an independent, strict fact checker. For EACH input object, copy its id exactly into one verdict. Judge whether its quote alone supports every detail in its claim. Do not use other input quotes, article titles, or outside knowledge; treat each object independently. Reject if any attribution, entity, event, time, cause, or material detail is absent from that SAME quote. Faithful translation is allowed. Return one verdict for each input id. When uncertain, reject.',
+      input: JSON.stringify({ claims }),
+      text: { format: { type: 'json_schema', name: 'claim_verdicts', strict: true, schema: {
+        type: 'object', additionalProperties: false, required: ['verdicts'],
+        properties: { verdicts: { type: 'array', items: verdict } },
+      } } },
+    }),
+  });
+  if (!response.ok) throw new Error(`Claim verifier request failed (${response.status})`);
+  const body = await response.json();
+  const output = body.output?.flatMap((item) => item.content ?? []).find((part) => part.type === 'output_text')?.text;
+  if (!output) throw new Error('Claim verifier returned no output_text');
+  const verdicts = JSON.parse(output).verdicts;
+  if (!Array.isArray(verdicts) || verdicts.length !== claims.length) throw new Error('Claim verifier returned incomplete verdicts');
+  const byId = new Map(verdicts.map((item) => [item.id, item.supported]));
+  if (byId.size !== claims.length || claims.some((item) => typeof byId.get(item.id) !== 'boolean')) {
+    throw new Error('Claim verifier returned invalid verdict IDs');
+  }
+  return {
+    supportedIds: new Set(claims.filter((item) => byId.get(item.id)).map((item) => item.id)),
+    usage: { modelInputTokens: body.usage?.input_tokens ?? 0, modelOutputTokens: body.usage?.output_tokens ?? 0 },
+  };
 }
 
 async function modelSegments(articles, listener, asOf, apiKey, numericFree = false) {
@@ -99,7 +140,7 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
-      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one spoken factual sentence of about 20-35 words for EACH distinct eventGroup, in order, up to targetStories. Do not collapse the whole briefing into one sentence. Use only the supplied article headlines and passages. For a mixed-topic article, speak only about the angle relevant to the listener's topics; do not lead with an unrelated headline item. Merge duplicate coverage within an event. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. Each segment must make ONE atomic claim from ONE cited article. Copy one exact contiguous evidence quote from that article passage that supports EVERY clause of the spoken sentence; a headline-only quote is insufficient when the sentence adds detail. Do not combine separate passages, add a cause or market reaction, or change a forecast into an observed event. If a detail is not explicit in the evidence quote, omit it. Every segment must name the articleId. Every numeric expression in the spoken text must also appear in that evidence quote with the same value and unit; otherwise omit the number. Keep entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the exact evidence quote.' : ''}`,
+      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one short spoken factual sentence of about 12-24 words for EACH distinct eventGroup, in order, up to targetStories. Prefer one simple clause over a long explanation. Do not collapse the whole briefing into one sentence. Use only the supplied article headlines and passages. For a mixed-topic article, speak only about the angle relevant to the listener's topics; do not lead with an unrelated headline item. Merge duplicate coverage within an event. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. Each segment must make ONE atomic claim from ONE cited article. Copy one exact contiguous evidence quote of 12-250 characters from that article passage that supports EVERY detail, entity and attribution in the spoken sentence; a headline-only quote is insufficient when the sentence adds detail. Before returning, compare each spoken sentence against its quote alone: remove every detail that a strict independent fact checker could not find in that quote. Do not combine separate passages, add a cause or market reaction, or change a forecast into an observed event. If a detail is not explicit in the evidence quote, omit it. Every segment must name the articleId. Every numeric expression in the spoken text must also appear in that evidence quote with the same value and unit; otherwise omit the number. Keep entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the exact evidence quote.' : ''}`,
       input: JSON.stringify({ listener: { language: listener.language, topics: listener.topics, depth: listener.depth, maxMinutes: listener.maxMinutes }, asOf, targetStories, articles: source }),
       text: { format: { type: 'json_schema', name: 'briefing_segments', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['segments'],
@@ -137,6 +178,19 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
       spokenText: candidate.text.trim(), numericExpressions: numericExpressions(candidate.text),
       reviewStatus: 'needs-editorial-review' });
   }
+  let verifierUsage = { modelInputTokens: 0, modelOutputTokens: 0 };
+  if (factCards.length) {
+    const verified = await verifyQuotedClaims(factCards, apiKey);
+    verifierUsage = verified.usage;
+    const rejectedCount = factCards.filter((card) => !verified.supportedIds.has(card.factId)).length;
+    if (rejectedCount) rejected.unsupported_claim = rejectedCount;
+    for (let index = factCards.length - 1; index >= 0; index--) {
+      if (!verified.supportedIds.has(factCards[index].factId)) {
+        factCards.splice(index, 1);
+        segments.splice(index, 1);
+      }
+    }
+  }
   const distinctEvents = new Set(segments.map((segment) => articles.find((article) => article.id === segment.sources[0].articleId)?.eventGroup));
   return {
     segments,
@@ -145,7 +199,10 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
     rejected,
     distinctEventCount: distinctEvents.size,
     requiredEventCount: Math.min(2, targetStories),
-    usage: { modelInputTokens: body.usage?.input_tokens ?? 0, modelOutputTokens: body.usage?.output_tokens ?? 0 },
+    usage: {
+      modelInputTokens: (body.usage?.input_tokens ?? 0) + verifierUsage.modelInputTokens,
+      modelOutputTokens: (body.usage?.output_tokens ?? 0) + verifierUsage.modelOutputTokens,
+    },
   };
 }
 
