@@ -1,0 +1,31 @@
+{
+  "id": "synthetic-ui-fixture",
+  "asOf": "2026-11-19T23:59:59.000Z",
+  "profileSummary": "Synthetic UI example — not a news briefing",
+  "segments": [
+    {
+      "text": "This is a fictional interface example, not a real news report.",
+      "factIds": [],
+      "sources": []
+    },
+    {
+      "text": "The fictional Example Market Index ended at 42 points.",
+      "factIds": ["synthetic-fact-1"],
+      "sources": [
+        {
+          "articleId": "synthetic-article-1",
+          "title": "Fictional source for interface testing",
+          "url": "https://example.com/fictional-source"
+        }
+      ]
+    }
+  ],
+  "audioUrl": null,
+  "durationSeconds": null,
+  "generationMs": 0,
+  "usage": {
+    "modelInputTokens": 0,
+    "modelOutputTokens": 0,
+    "ttsCharacters": 0
+  }
+}
