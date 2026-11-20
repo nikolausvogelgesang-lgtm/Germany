@@ -105,20 +105,27 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
   const parsed = JSON.parse(output);
   const byId = new Map(articles.map((article) => [article.id, article]));
   const segments = [];
+  const factCards = [];
   const rejected = {};
   for (const candidate of parsed.segments ?? []) {
     const article = byId.get(candidate.articleId);
     const reason = article ? modelSegmentFailure(candidate, article) : 'unknown_article';
     if (reason) { rejected[reason] = (rejected[reason] ?? 0) + 1; continue; }
+    const id = factId(article.id, candidate.evidenceQuote.trim());
     segments.push({
       text: candidate.text.trim(),
-      factIds: [factId(article.id, candidate.text.trim())],
+      factIds: [id],
       sources: [{ articleId: article.id, title: article.headline, url: article.url }],
     });
+    factCards.push({ factId: id, eventGroup: article.eventGroup, articleId: article.id,
+      sourceUrl: article.url, articleDate: article.date, evidenceQuote: candidate.evidenceQuote.trim(),
+      spokenText: candidate.text.trim(), numericExpressions: numericExpressions(candidate.text),
+      reviewStatus: 'needs-editorial-review' });
   }
   const distinctEvents = new Set(segments.map((segment) => articles.find((article) => article.id === segment.sources[0].articleId)?.eventGroup));
   return {
     segments,
+    factCards,
     proposedCount: parsed.segments?.length ?? 0,
     rejected,
     distinctEventCount: distinctEvents.size,
@@ -129,11 +136,18 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
 
 function headlineFallback(articles) {
   // Emergency, explicitly attributed short headline quotes; never read article bodies aloud.
-  return articles.map((article) => ({
+  const segments = articles.map((article) => ({
     text: `${article.outlet} reports: “${article.headline}.”`,
     factIds: [factId(article.id, article.headline)],
     sources: [{ articleId: article.id, title: article.headline, url: article.url }],
   }));
+  const factCards = articles.map((article) => ({
+    factId: factId(article.id, article.headline), eventGroup: article.id,
+    articleId: article.id, sourceUrl: article.url, articleDate: article.date,
+    evidenceQuote: article.headline, spokenText: `${article.outlet} reports: “${article.headline}.”`,
+    numericExpressions: numericExpressions(article.headline), reviewStatus: 'needs-editorial-review',
+  }));
+  return { segments, factCards };
 }
 
 export async function makeScript(groups, rawListener, asOf, apiKey = process.env.OPENAI_API_KEY) {
@@ -171,7 +185,7 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
   if (!result) {
     const nativeLanguage = selectArticles(groups, listener, asOf, { nativeOnly: true });
     if (!nativeLanguage.length) throw new Error(`No ${listener.language} source headlines available for fallback`);
-    result = { segments: headlineFallback(nativeLanguage), usage: modelUsage };
+    result = { ...headlineFallback(nativeLanguage), usage: modelUsage };
   }
   const introduction = listener.language === 'de'
     ? 'Guten Morgen. Diese Zusammenfassung wird von einer synthetischen Stimme gesprochen.'
@@ -182,6 +196,7 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
     listener,
     generationMode,
     modelStatus,
+    factCards: result.factCards,
     segments: [{ text: introduction, factIds: [], sources: [] }, ...result.segments],
     usage: result.usage,
   };

@@ -13,6 +13,7 @@ const port = Number(process.env.PORT ?? 3001);
 const dataset = await loadArticles(process.env.NEWSTEX_DATA_DIR);
 const { groups, diagnostics } = groupArticles(dataset);
 const usagePath = fileURLToPath(new URL('../../generated/usage.jsonl', import.meta.url));
+const auditPath = fileURLToPath(new URL('../../generated/fact-audit.jsonl', import.meta.url));
 
 function json(response, status, body) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': 'http://localhost:5173' });
@@ -76,6 +77,7 @@ const server = createServer(async (request, response) => {
       };
       await mkdir(fileURLToPath(new URL('../../generated/', import.meta.url)), { recursive: true });
       await appendFile(usagePath, `${JSON.stringify({ time: new Date().toISOString(), generationMode: result.generationMode, modelStatus: result.modelStatus, audioStatus: result.audioStatus, generationMs: result.generationMs, scriptMs, ttsMs, usage: result.usage })}\n`);
+      await appendFile(auditPath, `${JSON.stringify({ briefingId: result.id, asOf, profileSummary: result.profileSummary, factCards: script.factCards })}\n`);
       json(response, 200, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';

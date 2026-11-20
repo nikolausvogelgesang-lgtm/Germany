@@ -77,3 +77,21 @@ test('model sees independent outlet coverage of one selected event', async () =>
     assert.deepEqual(JSON.parse(sent.input).articles.map((item) => item.articleId).sort(), ['one', 'two']);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('a fact keeps its ID when spoken wording changes but evidence stays the same', async () => {
+  const source = article('stable', 'Producer prices rose 0.3%', 'Producer prices rose 0.3% in October.', '2026-11-18T12:00:00Z');
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  try {
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({
+      output: [{ content: [{ type: 'output_text', text: JSON.stringify({ segments: [{
+        text: calls++ ? 'In October, producer prices rose 0.3% according to the report.' : 'The report says producer prices rose 0.3% in October.',
+        articleId: 'stable', evidenceQuote: 'Producer prices rose 0.3% in October.',
+      }] }) }] }], usage: { input_tokens: 1, output_tokens: 1 },
+    }) });
+    const first = await makeScript([[source]], { language: 'en', maxMinutes: 1 }, '2026-11-19T23:59:59Z', 'fake-key');
+    const second = await makeScript([[source]], { language: 'en', maxMinutes: 1 }, '2026-11-19T23:59:59Z', 'fake-key');
+    assert.equal(first.factCards[0].factId, second.factCards[0].factId);
+    assert.equal(first.segments[1].factIds[0], first.factCards[0].factId);
+  } finally { globalThis.fetch = originalFetch; }
+});
