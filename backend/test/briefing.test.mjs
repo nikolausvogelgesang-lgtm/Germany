@@ -14,6 +14,7 @@ test('numeric claim needs the exact number in a real supporting passage', () => 
   assert.equal(validateModelSegment({ text: 'The report says producer prices rose 0.8% in October.', evidenceQuote: 'Producer prices rose 0.3% in October.' }, source), false);
   assert.equal(validateModelSegment({ text: 'The report says producer prices rose 0.3% in October.', evidenceQuote: 'A made-up passage said prices rose 0.3%.' }, source), false);
   assert.equal(validateModelSegment({ text: 'The report says producer prices rose 0.3 points in October.', evidenceQuote: 'Producer prices rose 0.3% in October.' }, source), false);
+  assert.equal(validateModelSegment({ text: 'Dem Bericht zufolge stiegen die Erzeugerpreise im Oktober um 0,3 Prozent.', evidenceQuote: 'Producer prices rose 0.3% in October.' }, source), true);
 });
 
 test('two listener interests produce different source-backed fallback stories', async () => {
