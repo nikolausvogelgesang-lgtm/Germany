@@ -155,16 +155,22 @@ export function groupArticles(articles) {
 export function rankGroups(groups, listener, asOf) {
   const cutoff = Date.parse(asOf);
   if (!Number.isFinite(cutoff)) throw new Error('Invalid asOf date');
-  const topicTokens = new Set((listener.topics ?? []).flatMap((topic) => [...headlineTokens(topic)]));
+  const topicQueries = (listener.topics ?? []).map((topic) => ({
+    raw: topic.trim().toLowerCase(), tokens: [...headlineTokens(topic)],
+  }));
+  const fxTerms = new Set(['fx', 'forex', 'currency', 'currencies', 'euro', 'yen', 'pound', 'sterling', 'exchange']);
   return groups.map((group) => {
     const eligible = group.filter((article) => article.dateMs <= cutoff);
     if (!eligible.length) return null;
     const newest = Math.max(...eligible.map((article) => article.dateMs));
     const ageDays = (cutoff - newest) / 86_400_000;
     if (ageDays > 7) return null;
-    const text = eligible.map((article) => `${article.headline} ${article.providerCategories.join(' ')}`).join(' ');
+    const native = eligible.filter((article) => article.language === listener.language);
+    const text = (native.length ? native : eligible).map((article) => article.headline).join(' ');
     const words = headlineTokens(text);
-    const topicHits = [...topicTokens].filter((token) => words.has(token)).length;
+    const topicHits = topicQueries.filter((query) => query.raw === 'fx'
+      ? [...fxTerms].some((term) => words.has(term)) || (/\bdollar\b/i.test(text) && !/\bfamily dollar\b|\b(?:million|billion|trillion)-dollar\b/i.test(text))
+      : query.tokens.length && query.tokens.every((token) => words.has(token))).length;
     const outlets = new Set(eligible.map((article) => article.outlet)).size;
     const score = Math.max(0, 7 - ageDays) * 2 + topicHits * 8 + Math.min(outlets, 3) * 2;
     return { articles: eligible, newest: new Date(newest).toISOString(), topicHits, score };
