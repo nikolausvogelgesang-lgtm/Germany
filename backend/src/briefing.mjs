@@ -72,7 +72,7 @@ export function validateModelSegment(candidate, article) {
   return modelSegmentFailure(candidate, article) === null;
 }
 
-async function modelSegments(articles, listener, asOf, apiKey) {
+async function modelSegments(articles, listener, asOf, apiKey, numericFree = false) {
   const targetStories = Math.min(4, new Set(articles.map((article) => article.eventGroup)).size);
   const source = articles.map((article) => ({
     articleId: article.id,
@@ -87,7 +87,7 @@ async function modelSegments(articles, listener, asOf, apiKey) {
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
-      instructions: 'Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one spoken factual sentence of about 20-35 words for EACH distinct eventGroup, in order, up to targetStories. Do not collapse the whole briefing into one sentence. Use only the supplied article headlines and passages. Merge duplicate coverage within an event. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. Every segment must name one articleId and copy a short exact evidence quote from that article headline OR supplied passage. Every numeric expression in the spoken text must also appear in that evidence quote with the same value and unit; otherwise omit the number. Keep entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.',
+      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one spoken factual sentence of about 20-35 words for EACH distinct eventGroup, in order, up to targetStories. Do not collapse the whole briefing into one sentence. Use only the supplied article headlines and passages. Merge duplicate coverage within an event. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. Every segment must name one articleId and copy a short exact evidence quote from that article headline OR supplied passage. Every numeric expression in the spoken text must also appear in that evidence quote with the same value and unit; otherwise omit the number. Keep entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the exact evidence quote.' : ''}`,
       input: JSON.stringify({ listener: { language: listener.language, topics: listener.topics, depth: listener.depth, maxMinutes: listener.maxMinutes }, asOf, targetStories, articles: source }),
       text: { format: { type: 'json_schema', name: 'briefing_segments', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['segments'],
@@ -146,8 +146,17 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
   let modelUsage = { modelInputTokens: 0, modelOutputTokens: 0 };
   if (apiKey) {
     try {
-      const candidate = await modelSegments(addIndependentCoverage(groups, articles, asOf), listener, asOf, apiKey);
+      const context = addIndependentCoverage(groups, articles, asOf);
+      let candidate = await modelSegments(context, listener, asOf, apiKey);
       modelUsage = candidate.usage;
+      if (candidate.distinctEventCount < candidate.requiredEventCount) {
+        const retry = await modelSegments(context, listener, asOf, apiKey, true);
+        modelUsage = {
+          modelInputTokens: modelUsage.modelInputTokens + retry.usage.modelInputTokens,
+          modelOutputTokens: modelUsage.modelOutputTokens + retry.usage.modelOutputTokens,
+        };
+        if (retry.distinctEventCount > candidate.distinctEventCount) candidate = retry;
+      }
       if (candidate.distinctEventCount >= candidate.requiredEventCount) {
         result = candidate;
         generationMode = 'source-checked-model';
