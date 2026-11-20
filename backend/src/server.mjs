@@ -54,9 +54,11 @@ const server = createServer(async (request, response) => {
       const input = await readJson(request);
       const asOf = input.asOf ? new Date(input.asOf).toISOString() : new Date().toISOString();
       const script = await makeScript(groups, input.listener, asOf);
+      const scriptMs = Date.now() - start;
       let audio;
       try { audio = await synthesize(script.segments); }
       catch (error) { audio = { audioUrl: null, ttsCharacters: 0, audioStatus: error.message }; }
+      const ttsMs = Date.now() - start - scriptMs;
       const result = {
         id: `briefing-${Date.now()}`,
         asOf,
@@ -65,13 +67,15 @@ const server = createServer(async (request, response) => {
         audioUrl: audio.audioUrl,
         durationSeconds: null,
         generationMs: Date.now() - start,
+        scriptMs,
+        ttsMs,
         usage: { ...script.usage, ttsCharacters: audio.ttsCharacters },
         generationMode: script.generationMode,
         modelStatus: script.modelStatus,
         audioStatus: audio.audioStatus,
       };
       await mkdir(fileURLToPath(new URL('../../generated/', import.meta.url)), { recursive: true });
-      await appendFile(usagePath, `${JSON.stringify({ time: new Date().toISOString(), generationMode: result.generationMode, modelStatus: result.modelStatus, audioStatus: result.audioStatus, generationMs: result.generationMs, usage: result.usage })}\n`);
+      await appendFile(usagePath, `${JSON.stringify({ time: new Date().toISOString(), generationMode: result.generationMode, modelStatus: result.modelStatus, audioStatus: result.audioStatus, generationMs: result.generationMs, scriptMs, ttsMs, usage: result.usage })}\n`);
       json(response, 200, result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
