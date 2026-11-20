@@ -61,7 +61,7 @@ export async function loadArticles(directory) {
 const STOP = new Set('a an and are as at by for from in into is it of on or the to was were what why with this that how after amid says said report reports over us uk'.split(' '));
 
 export function headlineTokens(headline) {
-  return new Set(headline.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9]+/g)?.filter((word) => (word.length > 2 || word === 'fx' || word === 'ai') && !STOP.has(word)) ?? []);
+  return new Set(headline.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9]+/g)?.filter((word) => (word.length > 2 || word === 'fx' || word === 'ai' || word === 'ol') && !STOP.has(word)) ?? []);
 }
 
 function similarity(a, b) {
@@ -159,6 +159,7 @@ export function rankGroups(groups, listener, asOf) {
     raw: topic.trim().toLowerCase(), tokens: [...headlineTokens(topic)],
   }));
   const fxTerms = new Set(['fx', 'forex', 'currency', 'currencies', 'euro', 'yen', 'pound', 'sterling', 'exchange']);
+  const energyTerms = ['energy', 'energie', 'oil', 'ol', 'brent', 'crude', 'petroleum', 'gas', 'erdgas'];
   return groups.map((group) => {
     const eligible = group.filter((article) => article.dateMs <= cutoff);
     if (!eligible.length) return null;
@@ -170,6 +171,8 @@ export function rankGroups(groups, listener, asOf) {
     const words = headlineTokens(text);
     const topicHits = topicQueries.filter((query) => query.raw === 'fx'
       ? [...fxTerms].some((term) => words.has(term)) || (/\bdollar\b/i.test(text) && !/\bfamily dollar\b|\b(?:million|billion|trillion)-dollar\b/i.test(text))
+      : /^(energie|energy|öl|oil)$/.test(query.raw)
+        ? [...words].some((word) => energyTerms.some((term) => word === term || (term.length >= 4 && word.startsWith(term))))
       : query.tokens.length && query.tokens.every((token) => words.has(token))).length;
     const outlets = new Set(eligible.map((article) => article.outlet)).size;
     const score = Math.max(0, 7 - ageDays) * 2 + topicHits * 8 + Math.min(outlets, 3) * 2;
