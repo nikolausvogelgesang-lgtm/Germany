@@ -51,3 +51,14 @@ test('FX listener does not mistake ordinary bank outages for central-bank news',
   assert.equal(ranked[1].articles[0].id, 'central');
   assert.equal(ranked.filter((group) => group.topicHits > 0).length, 2);
 });
+
+test('German oil wildcard selects energy stories instead of unrelated IPO news', () => {
+  const rows = [
+    article('ipo', 'Anthropic setzt IPO-Preis bei 83 Dollar fest', '2026-11-18T12:00:00Z', { language: 'de' }),
+    article('brent', 'Brent-Öl prallt von Unterstützung ab', '2026-11-18T11:00:00Z', { language: 'de' }),
+    article('energy', 'Energiepreise steigen nach Bericht', '2026-11-18T10:00:00Z', { language: 'de' }),
+  ];
+  const ranked = rankGroups(groupArticles(rows).groups, { language: 'de', topics: ['Energie', 'Öl'] }, '2026-11-19T23:59:59Z');
+  assert.equal(ranked.filter((group) => group.topicHits > 0).length, 2);
+  assert.equal(ranked.at(-1).articles[0].id, 'ipo');
+});

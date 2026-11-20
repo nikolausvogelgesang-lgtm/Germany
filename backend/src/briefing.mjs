@@ -25,8 +25,12 @@ export function selectArticles(groups, listener, asOf, { nativeOnly = false } = 
   const relevant = listener.topics.length && available.some((item) => item.topicHits > 0)
     ? available.filter((item) => item.topicHits > 0)
     : available;
+  const energyProfile = listener.topics.some((topic) => /^(energie|energy|öl|oil)$/i.test(topic));
+  const focused = energyProfile
+    ? relevant.filter((item) => !item.articles.some((article) => /^(?:sojabohnenpreis|soybean price)\s*:/i.test(article.headline)))
+    : relevant;
   const maximum = Math.min(MAX_STORIES, Math.max(2, Math.ceil(listener.maxMinutes * (listener.depth === 'deep' ? 1.1 : 1.8))));
-  return relevant.slice(0, maximum).map((group) => group.articles
+  return (focused.length ? focused : relevant).slice(0, maximum).map((group) => group.articles
     .slice()
     .sort((a, b) => Number(b.language === listener.language) - Number(a.language === listener.language) || b.dateMs - a.dateMs || a.id.localeCompare(b.id))[0]);
 }
@@ -87,7 +91,7 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
-      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one spoken factual sentence of about 20-35 words for EACH distinct eventGroup, in order, up to targetStories. Do not collapse the whole briefing into one sentence. Use only the supplied article headlines and passages. Merge duplicate coverage within an event. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. Every segment must name one articleId and copy a short exact evidence quote from that article headline OR supplied passage. Every numeric expression in the spoken text must also appear in that evidence quote with the same value and unit; otherwise omit the number. Keep entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the exact evidence quote.' : ''}`,
+      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one spoken factual sentence of about 20-35 words for EACH distinct eventGroup, in order, up to targetStories. Do not collapse the whole briefing into one sentence. Use only the supplied article headlines and passages. For a mixed-topic article, speak only about the angle relevant to the listener's topics; do not lead with an unrelated headline item. Merge duplicate coverage within an event. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. Every segment must name one articleId and copy a short exact evidence quote from that article headline OR supplied passage. Every numeric expression in the spoken text must also appear in that evidence quote with the same value and unit; otherwise omit the number. Keep entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the exact evidence quote.' : ''}`,
       input: JSON.stringify({ listener: { language: listener.language, topics: listener.topics, depth: listener.depth, maxMinutes: listener.maxMinutes }, asOf, targetStories, articles: source }),
       text: { format: { type: 'json_schema', name: 'briefing_segments', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['segments'],

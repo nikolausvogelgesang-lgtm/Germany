@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeScript, validateModelSegment } from '../src/briefing.mjs';
+import { makeScript, selectArticles, validateModelSegment } from '../src/briefing.mjs';
 
 const article = (id, headline, text, date, language = 'en') => ({
   id, headline, text, date, dateMs: Date.parse(date), language,
@@ -27,6 +27,16 @@ test('two listener interests produce different source-backed fallback stories', 
   const ai = await makeScript(groups, { language: 'en', topics: ['Nvidia AI'], maxMinutes: 1 }, asOf, '');
   assert.notDeepEqual(fx.segments.flatMap((s) => s.sources.map((x) => x.articleId)), ai.segments.flatMap((s) => s.sources.map((x) => x.articleId)));
   assert.equal(fx.generationMode, 'source-headline-fallback');
+});
+
+test('energy listener skips a soybean-led mixed commodity article when oil stories exist', () => {
+  const asOf = '2026-11-19T23:59:59Z';
+  const groups = [
+    [article('mixed', 'Sojabohnenpreis: Brent-Öl prallt von Unterstützung ab', 'Sojabohnen und Brent.', '2026-11-18T12:00:00Z', 'de')],
+    [article('oil', 'Brent-Öl unter Druck wegen Lagerbeständen', 'Brent-Öl fällt.', '2026-11-18T11:00:00Z', 'de')],
+  ];
+  const chosen = selectArticles(groups, { language: 'de', topics: ['Energie', 'Öl'], depth: 'brief', maxMinutes: 2 }, asOf);
+  assert.deepEqual(chosen.map((item) => item.id), ['oil']);
 });
 
 test('fallback never presents English headlines as a German briefing', async () => {
