@@ -10,6 +10,8 @@ Measured locally on 20 November 2026 with Node 24 and the six private Newstex JS
 
 The 10× row is a **synthetic runtime stress test**, not a measured 17,400-article Newstex release or a claim of equivalent grouping quality. The copies keep the same dates and headlines and receive unique IDs/text suffixes. The grouping algorithm still compares nearby candidate pairs, so do not extrapolate a linear 10× cost from the 1× timing.
 
+After adding one narrowly checked cross-outlet match for the Elon Musk/Huang return campaign, the same 1,740-record dataset forms **1,489 groups**, with 238 translation pairs and 10 curated cross-outlet pairs. The table above records the earlier grouping version; its 10× synthetic count was not rerun after this change.
+
 Recent live calls (each generated a source-linked script and MP3):
 
 | Profile / run | Script | TTS | Total | Model input / output tokens | Characters sent to ElevenLabs |
