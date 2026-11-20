@@ -172,6 +172,8 @@ export function rankGroups(groups, listener, asOf) {
     const words = headlineTokens(text);
     const topicHits = topicQueries.filter((query) => query.raw === 'fx'
       ? [...fxTerms].some((term) => words.has(term)) || (/\bdollar\b/i.test(text) && !/\bfamily dollar\b|\b(?:million|billion|trillion)-dollar\b/i.test(text))
+      : query.raw === 'cloud'
+        ? [...words].some((word) => /^cloud(?!flare)/.test(word))
       : /^(energie|energy|öl|oil)$/.test(query.raw)
         ? [...words].some((word) => energyTerms.some((term) => word === term || (term.length >= 4 && word.startsWith(term))))
       : query.tokens.length && query.tokens.every((token) => words.has(token))).length;

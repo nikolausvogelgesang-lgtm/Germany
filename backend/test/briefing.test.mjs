@@ -95,6 +95,29 @@ test('model output is accepted only when its quote supports the numeric claim', 
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('numbered evidence is retrieved from the source and an invalid index cannot create a claim', async () => {
+  const source = article('source', 'Producer price report',
+    'Producer prices rose 0.3% in October. The report was published on Friday.', '2026-11-18T12:00:00Z');
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_url, options) => {
+      const request = JSON.parse(options.body);
+      if (request.text.format.name === 'claim_verdicts') return approveClaims(request);
+      return mockOutput({ segments: [{
+        text: 'The report says producer prices rose 0.3% in October.', articleId: 'source', evidenceIndex: 0,
+      }] });
+    };
+    const accepted = await makeScript([[source]], { language: 'en', maxMinutes: 1 }, '2026-11-19T23:59:59Z', 'fake-key');
+    assert.equal(accepted.generationMode, 'source-checked-model');
+    assert.equal(accepted.factCards[0].evidenceQuote, 'Producer prices rose 0.3% in October.');
+    globalThis.fetch = async () => mockOutput({ segments: [{
+      text: 'The report says producer prices rose 0.3% in October.', articleId: 'source', evidenceIndex: 999,
+    }] });
+    const rejected = await makeScript([[source]], { language: 'en', maxMinutes: 1 }, '2026-11-19T23:59:59Z', 'fake-key');
+    assert.equal(rejected.generationMode, 'source-headline-fallback');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('model sees independent outlet coverage of one selected event', async () => {
   const first = article('one', 'Intel faces shareholder lawsuit', 'Intel faces a shareholder lawsuit after a stock decline.', '2026-11-18T12:00:00Z');
   const second = { ...article('two', 'Intel sued by shareholders', 'Shareholders sued Intel after a stock decline.', '2026-11-18T13:00:00Z'), outlet: 'Other outlet' };
@@ -145,6 +168,9 @@ test('German energy output rejects unrelated, English and copied passages', () =
   assert.equal(validateModelSegment({ text: 'Anthropic bereitet wegen starker Nachfrage seinen Börsengang vor.', evidenceQuote: 'Die Ölpreise fielen um mehr als 2%' }, source, listener), false);
   assert.equal(validateModelSegment({ text: 'Oil prices fell after the US crude inventories rose sharply.', evidenceQuote: 'Die Ölpreise fielen um mehr als 2%' }, source, listener), false);
   assert.equal(validateModelSegment({ text: passage, evidenceQuote: passage }, source, listener), false);
+  const fxPassage = 'AUD/JPY extended its decline on Tuesday, trading around 107.33 after breaking below key Fibonacci projection level at 107.63.';
+  const fx = article('fx-passage', 'AUD/JPY declines', fxPassage, '2026-11-18T12:00:00Z');
+  assert.equal(validateModelSegment({ text: fxPassage, evidenceQuote: fxPassage }, fx), false);
 });
 
 test('a short quote cannot support a long market explanation or English Dutch output', () => {
@@ -186,6 +212,33 @@ test('an unsupported claim is removed before the script can be called source che
     const result = await makeScript([[first], [second]], { language: 'en', topics: [], maxMinutes: 2 }, '2026-11-19T23:59:59Z', 'fake-key');
     assert.equal(result.generationMode, 'source-headline-fallback');
     assert.match(result.modelStatus, /unsupported_claim/);
+    const byArticle = new Map(result.segments.slice(1).map((segment) => [segment.sources[0].articleId, segment.text]));
+    assert.equal(byArticle.get('fx'), 'The euro fell against the dollar.');
+    assert.match(byArticle.get('ai'), /^Test outlet reports: “Cloud grows\.”$/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('a successful retry reports generator and verifier tokens from both attempts', async () => {
+  const first = article('fx', 'Euro falls', 'The euro fell against the dollar.', '2026-11-18T12:00:00Z');
+  const second = article('ai', 'Cloud grows', 'AI cloud revenue grew rapidly this year.', '2026-11-18T12:01:00Z');
+  const originalFetch = globalThis.fetch;
+  let attempts = 0;
+  try {
+    globalThis.fetch = async (_url, options) => {
+      const request = JSON.parse(options.body);
+      if (request.text.format.name === 'claim_verdicts') return approveClaims(request);
+      attempts++;
+      const segments = [{ text: 'The euro fell against the dollar.', articleId: 'fx', evidenceQuote: 'The euro fell against the dollar.' }];
+      if (attempts === 2) segments.push({ text: 'AI cloud revenue grew rapidly this year.', articleId: 'ai', evidenceQuote: 'AI cloud revenue grew rapidly this year.' });
+      return mockOutput({ segments });
+    };
+    const result = await makeScript([[first], [second]], { language: 'en', topics: [], maxMinutes: 2 }, '2026-11-19T23:59:59Z', 'fake-key');
+    assert.equal(result.generationMode, 'source-checked-model');
+    assert.equal(attempts, 2);
+    assert.deepEqual(result.usage, {
+      modelInputTokens: 4, modelOutputTokens: 4,
+      verifierInputTokens: 2, verifierOutputTokens: 2,
+    });
   } finally { globalThis.fetch = originalFetch; }
 });
 
