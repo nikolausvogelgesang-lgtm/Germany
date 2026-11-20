@@ -70,12 +70,6 @@ function similarity(a, b) {
   return union ? intersection / union : 0;
 }
 
-function sameContent(a, b) {
-  if (a.language !== b.language) return false;
-  const hash = (value) => createHash('sha256').update(value.replace(/\s+/g, ' ').trim()).digest('hex');
-  return a.text && b.text && hash(a.text) === hash(b.text);
-}
-
 // Editorially narrow event aliases for concrete cross-outlet cases in this dataset.
 // They are never treated as a general entity-only clustering rule.
 export function curatedEventKey(headline) {
@@ -109,6 +103,9 @@ export function groupArticles(articles) {
   const englishInvezz = articles.map((a, i) => [a, i]).filter(([a]) => a.feed === 'invezz_en.jsonl');
   const tokens = articles.map((a) => headlineTokens(a.headline));
   const eventKeys = articles.map((a) => curatedEventKey(a.headline));
+  const contentHashes = articles.map((a) => a.text
+    ? createHash('sha256').update(a.text.replace(/\s+/g, ' ').trim()).digest('hex')
+    : null);
   const diagnostics = { translationPairs: 0, translationAmbiguous: 0, exactDuplicates: 0, crossOutletPairs: 0, curatedPairs: 0 };
 
   for (let i = 0; i < articles.length; i++) {
@@ -133,7 +130,7 @@ export function groupArticles(articles) {
       const [b, bi] = byDate[right];
       if (b.dateMs - a.dateMs > 48 * 60 * 60_000) break;
       if (a.id === b.id) continue;
-      if (sameContent(a, b)) {
+      if (a.language === b.language && contentHashes[ai] && contentHashes[ai] === contentHashes[bi]) {
         union(parent, ai, bi);
         diagnostics.exactDuplicates++;
       } else if (a.outlet !== b.outlet && a.language === b.language && eventKeys[ai] && eventKeys[ai] === eventKeys[bi]) {
