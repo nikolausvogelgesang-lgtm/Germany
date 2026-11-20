@@ -18,6 +18,8 @@ test('numeric claim needs the exact number in a real supporting passage', () => 
   const oil = article('oil', 'Brent price update', 'Brent oil fell toward 90 $ per barrel.', '2026-11-18T12:00:00Z');
   assert.equal(validateModelSegment({ text: 'Brent oil fell toward $90 per barrel.', evidenceQuote: 'Brent oil fell toward 90 $ per barrel.' }, oil), true);
   assert.equal(validateModelSegment({ text: 'Brent oil fell toward 90 € per barrel.', evidenceQuote: 'Brent oil fell toward 90 $ per barrel.' }, oil), false);
+  const headlineOnly = article('h', 'Oil prices fall after inventory report', 'The inventory report is expected tomorrow.', '2026-11-18T12:00:00Z');
+  assert.equal(validateModelSegment({ text: 'Oil prices fell after the inventory report.', evidenceQuote: 'Oil prices fall after inventory report' }, headlineOnly), false);
 });
 
 test('two listener interests produce different source-backed fallback stories', async () => {
@@ -121,5 +123,37 @@ test('a fact keeps its ID when spoken wording changes but evidence stays the sam
     const second = await makeScript([[source]], { language: 'en', maxMinutes: 1 }, '2026-11-19T23:59:59Z', 'fake-key');
     assert.equal(first.factCards[0].factId, second.factCards[0].factId);
     assert.equal(first.segments[1].factIds[0], first.factCards[0].factId);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('German energy output rejects unrelated, English and copied passages', () => {
+  const passage = 'Die Ölpreise fielen um mehr als 2%, nachdem die US-Rohölbestände gestiegen waren und Händler wegen des zusätzlichen Angebots ihre Erwartungen für den Winter angepasst hatten.';
+  const source = article('energy', 'Brent-Öl fällt', passage, '2026-11-18T12:00:00Z', 'de');
+  const listener = { language: 'de', topics: ['Energie', 'Öl'] };
+  assert.equal(validateModelSegment({ text: 'Anthropic bereitet wegen starker Nachfrage seinen Börsengang vor.', evidenceQuote: 'Die Ölpreise fielen um mehr als 2%' }, source, listener), false);
+  assert.equal(validateModelSegment({ text: 'Oil prices fell after the US crude inventories rose sharply.', evidenceQuote: 'Die Ölpreise fielen um mehr als 2%' }, source, listener), false);
+  assert.equal(validateModelSegment({ text: passage, evidenceQuote: passage }, source, listener), false);
+});
+
+test('a short quote cannot support a long market explanation or English Dutch output', () => {
+  const source = article('uup', 'Dollar fund update', 'The fund just hit a 52-week high as hawkish Fed comments reinforced expectations of rate hikes.', '2026-11-18T12:00:00Z');
+  assert.equal(validateModelSegment({ text: 'Zacks says the dollar fund hit a 52-week high as hawkish Fed comments reinforced expectations of further interest rate hikes.', evidenceQuote: 'The fund just hit a 52-week high' }, source), false);
+  const dutchSource = article('baidu', 'Baidu AI cloud', 'Revenues increased 94% year over year to RMB 8.2 billion.', '2026-11-18T12:00:00Z', 'nl');
+  assert.equal(validateModelSegment({ text: 'Baidu revenues increased 94% year over year, but advertising will remain under pressure.', evidenceQuote: 'Revenues increased 94% year over year to RMB 8.2 billion.' }, dutchSource, { language: 'nl', topics: ['AI'] }), false);
+});
+
+test('model keeps one verified segment per event', async () => {
+  const first = article('one', 'Brent crude falls', 'Brent crude fell after inventory data.', '2026-11-18T12:00:00Z');
+  const second = article('two', 'Oil prices stay weak', 'Oil prices stayed weak despite supply risks.', '2026-11-18T11:00:00Z');
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ output: [{ content: [{ type: 'output_text', text: JSON.stringify({ segments: [
+      { text: 'Brent crude fell after inventory data.', articleId: 'one', evidenceQuote: 'Brent crude fell after inventory data.' },
+      { text: 'Brent crude fell after inventory data again.', articleId: 'one', evidenceQuote: 'Brent crude fell after inventory data.' },
+      { text: 'Oil prices stayed weak despite supply risks.', articleId: 'two', evidenceQuote: 'Oil prices stayed weak despite supply risks.' },
+    ] }) }] }], usage: { input_tokens: 1, output_tokens: 1 } }) });
+    const result = await makeScript([[first], [second]], { language: 'en', topics: [], maxMinutes: 2 }, '2026-11-19T23:59:59Z', 'fake-key');
+    assert.equal(result.generationMode, 'source-checked-model');
+    assert.equal(result.factCards.length, 2);
   } finally { globalThis.fetch = originalFetch; }
 });
