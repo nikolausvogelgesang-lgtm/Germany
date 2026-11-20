@@ -7,6 +7,6 @@
     "start": "node src/server.mjs",
     "test": "node --test",
     "smoke": "node scripts/smoke.mjs",
-    "embed": "node scripts/build-embeddings.mjs"
+    "profile-gate": "node scripts/profile-gate.mjs"
   }
 }
