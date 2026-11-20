@@ -37,3 +37,17 @@ test('editorial event aliases join cross-outlet reports without merging unrelate
   assert.equal(groups.length, 2);
   assert.equal(diagnostics.curatedPairs, 1);
 });
+
+test('FX listener does not mistake ordinary bank outages for central-bank news', () => {
+  const rows = [
+    article('outage', 'Chase bank users report login outage', '2026-11-18T12:00:00Z'),
+    article('brand', 'Family Dollar reports settlement', '2026-11-18T11:30:00Z'),
+    article('valuation', 'SpaceX billion-dollar forecast emerges', '2026-11-18T11:15:00Z'),
+    article('fx', 'Dollar and euro currencies react to rate decision', '2026-11-18T11:00:00Z'),
+    article('central', 'Central bank announces interest rate decision', '2026-11-18T10:00:00Z'),
+  ];
+  const ranked = rankGroups(groupArticles(rows).groups, { topics: ['FX', 'central bank'] }, '2026-11-19T23:59:59Z');
+  assert.equal(ranked[0].articles[0].id, 'fx');
+  assert.equal(ranked[1].articles[0].id, 'central');
+  assert.equal(ranked.filter((group) => group.topicHits > 0).length, 2);
+});
