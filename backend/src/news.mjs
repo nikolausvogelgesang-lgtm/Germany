@@ -82,6 +82,11 @@ export function curatedEventKey(headline) {
   const title = headline.toLowerCase();
   if (/\bintel\b/.test(title) && /lawsuit|fraud|shareholder suit|sued/.test(title)) return 'intel-shareholder-lawsuit';
   if (/\bppi\b|producer prices?/.test(title) && /\bus\b|\bwall street\b|\bdollar\b/.test(title)) return 'us-ppi-release';
+  if (/\bbaidu\b/.test(title) && /ai cloud/.test(title) && /growth/.test(title)) return 'baidu-q3-cloud-growth';
+  if (/deutsche bank/.test(title) && /epstein/.test(title) && /leak|transaction|payment/.test(title)) return 'deutsche-bank-epstein-leak';
+  if (/nvidia/.test(title) && /elon musk/.test(title) && /jensen huang/.test(title)) return 'nvidia-musk-reaction';
+  if (/microsoft/.test(title) && /global outage/.test(title)) return 'microsoft-global-outage';
+  if (/disney/.test(title) && /earnings|q4/.test(title)) return 'disney-q4-earnings';
   return null;
 }
 

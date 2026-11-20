@@ -35,33 +35,48 @@ function addIndependentCoverage(groups, primaries, asOf) {
   const cutoff = Date.parse(asOf);
   const selected = [];
   for (const primary of primaries) {
-    selected.push(primary);
+    selected.push({ ...primary, eventGroup: primary.id });
     const group = groups.find((items) => items.some((item) => item.id === primary.id));
     const secondary = group?.filter((item) => item.outlet !== primary.outlet && item.dateMs <= cutoff)
       .sort((a, b) => b.dateMs - a.dateMs)[0];
-    if (secondary) selected.push(secondary);
+    if (secondary) selected.push({ ...secondary, eventGroup: primary.id });
   }
   return selected;
 }
 
-const NUMBER = /(?<![a-z0-9])[$€£]?\d+(?:[.,]\d+)*(?:\s?(?:%|percent|percentage points?|basis points?|million|billion|trillion))?/gi;
+const NUMBER = /(?<![a-z0-9])[$€£]?\d+(?:[.,]\d+)*(?:\s?(?:%|percentage points?|prozentpunkte?|procentpunten?|basis points?|basispunkte?|basispunten?|percent|prozent|procent|millionen?|miljoen|milliarden?|miljard|billion|trillion))?/gi;
 const normalized = (text) => text.toLowerCase().replace(/\s+/g, ' ').trim();
-const numericExpressions = (text) => (text.match(NUMBER) ?? []).map((value) => normalized(value).replace(/\s*%$/, ' percent'));
+const quoteMatchText = (text) => text.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+const numericExpressions = (text) => (text.match(NUMBER) ?? []).map((value) => normalized(value)
+  .replace(/\s*(?:%|percent|prozent|procent)$/, ' percent')
+  .replace(/\s*(?:millionen?|miljoen)$/, ' million')
+  .replace(/\s*(?:milliarden?|miljard)$/, ' billion')
+  .replace(/\s*(?:prozentpunkte?|procentpunten?)$/, ' percentage points')
+  .replace(/\s*(?:basispunkte?|basispunten?)$/, ' basis points')
+  .replace(/,(?=\d)/g, '.'));
 
-export function validateModelSegment(candidate, article) {
-  if (!candidate || typeof candidate.text !== 'string' || typeof candidate.evidenceQuote !== 'string') return false;
+function modelSegmentFailure(candidate, article) {
+  if (!candidate || typeof candidate.text !== 'string' || typeof candidate.evidenceQuote !== 'string') return 'invalid_shape';
   const claim = candidate.text.trim();
   const quote = candidate.evidenceQuote.trim();
-  if (claim.length < 20 || claim.length > 280 || quote.length < 12 || quote.length > 250) return false;
-  if (!normalized(article.text).includes(normalized(quote))) return false;
+  if (claim.length < 20 || claim.length > 280 || quote.length < 12 || quote.length > 250) return 'invalid_length';
+  const excerpt = quoteMatchText(quote);
+  if (!quoteMatchText(article.text).includes(excerpt) && !quoteMatchText(article.headline).includes(excerpt)) return 'quote_not_in_source';
   const claimNumbers = numericExpressions(claim);
   const quoteNumbers = new Set(numericExpressions(quote));
-  return claimNumbers.every((number) => quoteNumbers.has(number));
+  if (!claimNumbers.every((number) => quoteNumbers.has(number))) return 'number_or_unit_mismatch';
+  return null;
+}
+
+export function validateModelSegment(candidate, article) {
+  return modelSegmentFailure(candidate, article) === null;
 }
 
 async function modelSegments(articles, listener, asOf, apiKey) {
+  const targetStories = Math.min(4, new Set(articles.map((article) => article.eventGroup)).size);
   const source = articles.map((article) => ({
     articleId: article.id,
+    eventGroup: article.eventGroup,
     outlet: article.outlet,
     headline: article.headline,
     date: article.date,
@@ -71,9 +86,9 @@ async function modelSegments(articles, listener, asOf, apiKey) {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
-      instructions: 'Write a short financial news audio briefing in the listener language. Use only the supplied source passages. Articles about the same event may come from different outlets; merge duplicate coverage. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. One concise factual sentence per segment. Every segment must name one articleId and copy a short exact evidence quote from that article passage. Keep every number, unit, entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.',
-      input: JSON.stringify({ listener: { language: listener.language, topics: listener.topics, depth: listener.depth, maxMinutes: listener.maxMinutes }, asOf, articles: source }),
+      model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
+      instructions: 'Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one spoken factual sentence of about 20-35 words for EACH distinct eventGroup, in order, up to targetStories. Do not collapse the whole briefing into one sentence. Use only the supplied article headlines and passages. Merge duplicate coverage within an event. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. Every segment must name one articleId and copy a short exact evidence quote from that article headline OR supplied passage. Every numeric expression in the spoken text must also appear in that evidence quote with the same value and unit; otherwise omit the number. Keep entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.',
+      input: JSON.stringify({ listener: { language: listener.language, topics: listener.topics, depth: listener.depth, maxMinutes: listener.maxMinutes }, asOf, targetStories, articles: source }),
       text: { format: { type: 'json_schema', name: 'briefing_segments', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['segments'],
         properties: { segments: { type: 'array', items: {
@@ -90,17 +105,26 @@ async function modelSegments(articles, listener, asOf, apiKey) {
   const parsed = JSON.parse(output);
   const byId = new Map(articles.map((article) => [article.id, article]));
   const segments = [];
+  const rejected = {};
   for (const candidate of parsed.segments ?? []) {
     const article = byId.get(candidate.articleId);
-    if (!article || !validateModelSegment(candidate, article)) continue;
+    const reason = article ? modelSegmentFailure(candidate, article) : 'unknown_article';
+    if (reason) { rejected[reason] = (rejected[reason] ?? 0) + 1; continue; }
     segments.push({
       text: candidate.text.trim(),
       factIds: [factId(article.id, candidate.text.trim())],
       sources: [{ articleId: article.id, title: article.headline, url: article.url }],
     });
   }
-  if (!segments.length) throw new Error('No model segment passed source checks');
-  return { segments, usage: { modelInputTokens: body.usage?.input_tokens ?? 0, modelOutputTokens: body.usage?.output_tokens ?? 0 } };
+  const distinctEvents = new Set(segments.map((segment) => articles.find((article) => article.id === segment.sources[0].articleId)?.eventGroup));
+  return {
+    segments,
+    proposedCount: parsed.segments?.length ?? 0,
+    rejected,
+    distinctEventCount: distinctEvents.size,
+    requiredEventCount: Math.min(2, targetStories),
+    usage: { modelInputTokens: body.usage?.input_tokens ?? 0, modelOutputTokens: body.usage?.output_tokens ?? 0 },
+  };
 }
 
 function headlineFallback(articles) {
@@ -119,11 +143,18 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
   let result;
   let generationMode = 'source-headline-fallback';
   let modelStatus = 'key_missing';
+  let modelUsage = { modelInputTokens: 0, modelOutputTokens: 0 };
   if (apiKey) {
     try {
-      result = await modelSegments(addIndependentCoverage(groups, articles, asOf), listener, asOf, apiKey);
-      generationMode = 'source-checked-model';
-      modelStatus = 'ok';
+      const candidate = await modelSegments(addIndependentCoverage(groups, articles, asOf), listener, asOf, apiKey);
+      modelUsage = candidate.usage;
+      if (candidate.distinctEventCount >= candidate.requiredEventCount) {
+        result = candidate;
+        generationMode = 'source-checked-model';
+        modelStatus = 'ok';
+      } else {
+        modelStatus = `validated ${candidate.segments.length}/${candidate.proposedCount} segments across ${candidate.distinctEventCount}/${candidate.requiredEventCount} required events; rejected ${JSON.stringify(candidate.rejected)}`;
+      }
     } catch (error) {
       modelStatus = error instanceof Error ? error.message : 'Model error';
     }
@@ -131,7 +162,7 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
   if (!result) {
     const nativeLanguage = selectArticles(groups, listener, asOf, { nativeOnly: true });
     if (!nativeLanguage.length) throw new Error(`No ${listener.language} source headlines available for fallback`);
-    result = { segments: headlineFallback(nativeLanguage), usage: { modelInputTokens: 0, modelOutputTokens: 0 } };
+    result = { segments: headlineFallback(nativeLanguage), usage: modelUsage };
   }
   const introduction = listener.language === 'de'
     ? 'Guten Morgen. Diese Zusammenfassung wird von einer synthetischen Stimme gesprochen.'
