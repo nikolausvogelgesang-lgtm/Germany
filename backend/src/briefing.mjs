@@ -142,17 +142,24 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
   };
 }
 
-function headlineFallback(articles) {
+function headlineFallback(articles, language) {
   // Emergency, explicitly attributed short headline quotes; never read article bodies aloud.
+  const spokenHeadline = (article) => {
+    const headline = article.headline.trim();
+    const end = /[.!?]$/.test(headline) ? '' : '.';
+    if (language === 'de') return `${article.outlet} berichtet: „${headline}${end}“`;
+    if (language === 'nl') return `${article.outlet} meldt: „${headline}${end}”`;
+    return `${article.outlet} reports: “${headline}${end}”`;
+  };
   const segments = articles.map((article) => ({
-    text: `${article.outlet} reports: “${article.headline}.”`,
+    text: spokenHeadline(article),
     factIds: [factId(article.id, article.headline)],
     sources: [{ articleId: article.id, title: article.headline, url: article.url }],
   }));
   const factCards = articles.map((article) => ({
     factId: factId(article.id, article.headline), eventGroup: article.id,
     articleId: article.id, sourceUrl: article.url, articleDate: article.date,
-    evidenceQuote: article.headline, spokenText: `${article.outlet} reports: “${article.headline}.”`,
+    evidenceQuote: article.headline, spokenText: spokenHeadline(article),
     numericExpressions: numericExpressions(article.headline), reviewStatus: 'needs-editorial-review',
   }));
   return { segments, factCards };
@@ -198,7 +205,7 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
     if (listener.topics.length && !rankGroups(groups, listener, asOf).some((group) => group.topicHits > 0 && group.articles.some((article) => article.language === listener.language))) {
       topicMatchStatus = 'general-fallback';
     }
-    result = { ...headlineFallback(nativeLanguage), usage: modelUsage };
+    result = { ...headlineFallback(nativeLanguage, listener.language), usage: modelUsage };
   }
   const introduction = listener.language === 'de'
     ? 'Guten Morgen. Diese Zusammenfassung wird von einer synthetischen Stimme gesprochen.'

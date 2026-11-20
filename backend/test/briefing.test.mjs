@@ -58,6 +58,13 @@ test('fallback never presents English headlines as a German briefing', async () 
   const result = await makeScript(groups, { language: 'de', topics: ['currency'], maxMinutes: 1 }, asOf, '');
   assert.deepEqual(result.segments.flatMap((s) => s.sources.map((x) => x.articleId)), ['de']);
   assert.equal(result.topicMatchStatus, 'general-fallback');
+  assert.match(result.segments[1].text, /berichtet: „/);
+});
+
+test('Dutch fallback attributes the source without duplicate punctuation', async () => {
+  const source = article('nl', 'Stijgt Brent morgen?', 'Brent blijft onzeker.', '2026-11-18T12:00:00Z', 'nl');
+  const result = await makeScript([[source]], { language: 'nl', topics: ['Brent'], maxMinutes: 1 }, '2026-11-19T23:59:59Z', '');
+  assert.match(result.segments[1].text, /meldt: „Stijgt Brent morgen\?”$/);
 });
 
 test('model output is accepted only when its quote supports the numeric claim', async () => {
