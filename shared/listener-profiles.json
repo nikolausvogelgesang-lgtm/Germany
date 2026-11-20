@@ -1,0 +1,14 @@
+[
+  {
+    "id": "fx-trader",
+    "name": "FX trader",
+    "pain": "Needs currency and central-bank moves before the trading day, with exact figures and source links.",
+    "listener": { "language": "en", "topics": ["FX", "central bank"], "depth": "brief", "maxMinutes": 2 }
+  },
+  {
+    "id": "dutch-ai-investor",
+    "name": "Dutch AI investor",
+    "pain": "Wants a short Dutch briefing on AI businesses and cloud growth, not an English market roundup.",
+    "listener": { "language": "nl", "topics": ["AI", "cloud"], "depth": "brief", "maxMinutes": 2 }
+  }
+]

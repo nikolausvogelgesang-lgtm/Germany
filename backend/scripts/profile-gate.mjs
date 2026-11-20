@@ -1,8 +1,9 @@
 const base = process.env.BACKEND_URL || 'http://localhost:3001';
+const { readFile } = await import('node:fs/promises');
 const asOf = '2026-11-19T23:59:59Z';
+const presets = JSON.parse(await readFile(new URL('../../shared/listener-profiles.json', import.meta.url), 'utf8'));
 const profiles = [
-  { name: 'markets', listener: { language: 'en', topics: ['FX', 'central bank'], depth: 'brief', maxMinutes: 2 } },
-  { name: 'technology', listener: { language: 'en', topics: ['AI', 'technology'], depth: 'brief', maxMinutes: 2 } },
+  ...presets,
   { name: 'wildcard-energy-de', listener: { language: 'de', topics: ['Energie', 'Öl'], depth: 'brief', maxMinutes: 2 } },
 ];
 
