@@ -8,6 +8,14 @@ const article = (id, headline, text, date, language = 'en') => ({
   providerCategories: [], feed: 'test.jsonl',
 });
 
+const mockOutput = (value) => ({ ok: true, json: async () => ({
+  output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }],
+  usage: { input_tokens: 1, output_tokens: 1 },
+}) });
+const approveClaims = (request) => mockOutput({
+  verdicts: JSON.parse(request.input).claims.map((claim) => ({ id: claim.id, supported: true })),
+});
+
 test('numeric claim needs the exact number in a real supporting passage', () => {
   const source = article('a', 'Producer prices rose', 'Producer prices rose 0.3% in October.', '2026-11-18T12:00:00Z');
   assert.equal(validateModelSegment({ text: 'The report says producer prices rose 0.3% in October.', evidenceQuote: 'Producer prices rose 0.3% in October.' }, source), true);
@@ -94,7 +102,9 @@ test('model sees independent outlet coverage of one selected event', async () =>
   let sent;
   try {
     globalThis.fetch = async (_url, options) => {
-      sent = JSON.parse(options.body);
+      const request = JSON.parse(options.body);
+      if (request.text.format.name === 'claim_verdicts') return approveClaims(request);
+      sent = request;
       return { ok: true, json: async () => ({
         output: [{ content: [{ type: 'output_text', text: JSON.stringify({ segments: [{
           text: 'Intel faces a shareholder lawsuit after a stock decline.',
@@ -113,12 +123,14 @@ test('a fact keeps its ID when spoken wording changes but evidence stays the sam
   const originalFetch = globalThis.fetch;
   let calls = 0;
   try {
-    globalThis.fetch = async () => ({ ok: true, json: async () => ({
-      output: [{ content: [{ type: 'output_text', text: JSON.stringify({ segments: [{
+    globalThis.fetch = async (_url, options) => {
+      const request = JSON.parse(options.body);
+      if (request.text.format.name === 'claim_verdicts') return approveClaims(request);
+      return mockOutput({ segments: [{
         text: calls++ ? 'In October, producer prices rose 0.3% according to the report.' : 'The report says producer prices rose 0.3% in October.',
         articleId: 'stable', evidenceQuote: 'Producer prices rose 0.3% in October.',
-      }] }) }] }], usage: { input_tokens: 1, output_tokens: 1 },
-    }) });
+      }] });
+    };
     const first = await makeScript([[source]], { language: 'en', maxMinutes: 1 }, '2026-11-19T23:59:59Z', 'fake-key');
     const second = await makeScript([[source]], { language: 'en', maxMinutes: 1 }, '2026-11-19T23:59:59Z', 'fake-key');
     assert.equal(first.factCards[0].factId, second.factCards[0].factId);
@@ -142,16 +154,55 @@ test('a short quote cannot support a long market explanation or English Dutch ou
   assert.equal(validateModelSegment({ text: 'Baidu revenues increased 94% year over year, but advertising will remain under pressure.', evidenceQuote: 'Revenues increased 94% year over year to RMB 8.2 billion.' }, dutchSource, { language: 'nl', topics: ['AI'] }), false);
 });
 
+test('a cited passage must contain a specific AI infrastructure detail spoken aloud', () => {
+  const passage = 'SpaceX heeft plannen voor AI-infrastructuur in Texas. Citi ziet SpaceX zijn eigen mobiele netwerk opbouwen als het wil concurreren met gevestigde operators.';
+  const source = article('spacex', 'SpaceX en AI', passage, '2026-11-18T12:00:00Z', 'nl');
+  const listener = { language: 'nl', topics: ['AI', 'cloud'] };
+  assert.equal(validateModelSegment({
+    text: 'Volgens Citi heeft SpaceX plannen voor AI-infrastructuur en een eigen mobiel netwerk.',
+    evidenceQuote: 'Citi ziet SpaceX zijn eigen mobiele netwerk opbouwen als het wil concurreren met gevestigde operators.',
+  }, source, listener), false);
+  assert.equal(validateModelSegment({
+    text: 'SpaceX heeft volgens het bericht plannen voor AI-infrastructuur in Texas.',
+    evidenceQuote: 'SpaceX heeft plannen voor AI-infrastructuur in Texas.',
+  }, source, listener), true);
+});
+
+test('an unsupported claim is removed before the script can be called source checked', async () => {
+  const first = article('fx', 'Euro falls', 'The euro fell against the dollar.', '2026-11-18T12:00:00Z');
+  const second = article('ai', 'Cloud grows', 'AI cloud revenue grew rapidly this year.', '2026-11-18T12:01:00Z');
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_url, options) => {
+      const request = JSON.parse(options.body);
+      if (request.text.format.name === 'claim_verdicts') {
+        return mockOutput({ verdicts: JSON.parse(request.input).claims.map((claim, index) => ({ id: claim.id, supported: index === 0 })) });
+      }
+      return mockOutput({ segments: [
+        { text: 'The euro fell against the dollar.', articleId: 'fx', evidenceQuote: 'The euro fell against the dollar.' },
+        { text: 'AI cloud revenue grew rapidly this year.', articleId: 'ai', evidenceQuote: 'AI cloud revenue grew rapidly this year.' },
+      ] });
+    };
+    const result = await makeScript([[first], [second]], { language: 'en', topics: [], maxMinutes: 2 }, '2026-11-19T23:59:59Z', 'fake-key');
+    assert.equal(result.generationMode, 'source-headline-fallback');
+    assert.match(result.modelStatus, /unsupported_claim/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test('model keeps one verified segment per event', async () => {
   const first = article('one', 'Brent crude falls', 'Brent crude fell after inventory data.', '2026-11-18T12:00:00Z');
   const second = article('two', 'Oil prices stay weak', 'Oil prices stayed weak despite supply risks.', '2026-11-18T11:00:00Z');
   const originalFetch = globalThis.fetch;
   try {
-    globalThis.fetch = async () => ({ ok: true, json: async () => ({ output: [{ content: [{ type: 'output_text', text: JSON.stringify({ segments: [
-      { text: 'Brent crude fell after inventory data.', articleId: 'one', evidenceQuote: 'Brent crude fell after inventory data.' },
-      { text: 'Brent crude fell after inventory data again.', articleId: 'one', evidenceQuote: 'Brent crude fell after inventory data.' },
-      { text: 'Oil prices stayed weak despite supply risks.', articleId: 'two', evidenceQuote: 'Oil prices stayed weak despite supply risks.' },
-    ] }) }] }], usage: { input_tokens: 1, output_tokens: 1 } }) });
+    globalThis.fetch = async (_url, options) => {
+      const request = JSON.parse(options.body);
+      if (request.text.format.name === 'claim_verdicts') return approveClaims(request);
+      return mockOutput({ segments: [
+        { text: 'Brent crude fell after inventory data.', articleId: 'one', evidenceQuote: 'Brent crude fell after inventory data.' },
+        { text: 'Brent crude fell after inventory data again.', articleId: 'one', evidenceQuote: 'Brent crude fell after inventory data.' },
+        { text: 'Oil prices stayed weak despite supply risks.', articleId: 'two', evidenceQuote: 'Oil prices stayed weak despite supply risks.' },
+      ] });
+    };
     const result = await makeScript([[first], [second]], { language: 'en', topics: [], maxMinutes: 2 }, '2026-11-19T23:59:59Z', 'fake-key');
     assert.equal(result.generationMode, 'source-checked-model');
     assert.equal(result.factCards.length, 2);
