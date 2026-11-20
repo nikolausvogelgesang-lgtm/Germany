@@ -16,6 +16,7 @@ for (const profile of profiles) {
   });
   const briefing = await response.json();
   if (!response.ok) throw new Error(`${profile.name}: HTTP ${response.status}: ${briefing.error}`);
+  if (briefing.topicMatchStatus !== 'matched') throw new Error(`${profile.name}: topics did not match the selected stories`);
   const facts = briefing.segments.filter((item) => item.factIds.length);
   if (facts.length < 2 || facts.some((item) => !item.sources.length || item.sources.some((source) => !source.url))) {
     throw new Error(`${profile.name}: incomplete or unsourced briefing`);
