@@ -73,3 +73,13 @@ test('German oil wildcard selects energy stories instead of unrelated IPO news',
   assert.equal(ranked.filter((group) => group.topicHits > 0).length, 2);
   assert.equal(ranked.at(-1).articles[0].id, 'ipo');
 });
+
+test('Dutch AI and cloud listener prioritizes AI-cloud growth over a generic AI headline', () => {
+  const rows = [
+    article('spacex', 'SpaceX-aandelen stijgen door AI', '2026-11-18T12:00:00Z', { language: 'nl' }),
+    article('baidu', 'Baidu-aandeel ondanks 94% AI-cloudgroei', '2026-11-17T12:00:00Z', { language: 'nl' }),
+  ];
+  const ranked = rankGroups(groupArticles(rows).groups, { language: 'nl', topics: ['AI', 'cloud'] }, '2026-11-19T23:59:59Z');
+  assert.equal(ranked[0].articles[0].id, 'baidu');
+  assert.equal(ranked[0].topicHits, 2);
+});

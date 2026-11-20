@@ -73,7 +73,7 @@ function modelSegmentFailure(candidate, article, listener) {
   if (claim.length < 20 || claim.length > 280 || quote.length < 12 || quote.length > 250) return 'invalid_length';
   if (['de', 'nl'].includes(listener?.language) && (claim.match(/\b(the|while|despite|reports|prices|after|with|was|were|had|said|that|year|but|will|remain|under|increased|revenues|executives)\b/gi) ?? []).length >= 2) return 'wrong_language';
   if (listener?.topics.some((topic) => /^(energie|energy|öl|oil)$/i.test(topic)) && !/(?:öl|oil|brent|rohöl|energie|energy|erdgas|gaspreis)/i.test(claim)) return 'off_topic';
-  if (quoteMatchText(claim) === quoteMatchText(quote) && claim.split(/\s+/).length > 18) return 'copied_passage';
+  if (quoteMatchText(claim) === quoteMatchText(quote) && claim.split(/\s+/).length >= 18) return 'copied_passage';
   if (quote.split(/\s+/).length < Math.max(6, Math.ceil(claim.split(/\s+/).length / 2))) return 'insufficient_evidence_quote';
   const excerpt = quoteMatchText(quote);
   if (!quoteMatchText(article.text.slice(0, 1800)).includes(excerpt)) return 'quote_not_in_source';
@@ -100,8 +100,8 @@ async function verifyQuotedClaims(factCards, apiKey) {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
-      instructions: 'You are an independent, strict fact checker. For EACH input object, copy its id exactly into one verdict. Judge whether its quote alone supports every detail in its claim. Do not use other input quotes, article titles, or outside knowledge; treat each object independently. Reject if any attribution, entity, event, time, cause, or material detail is absent from that SAME quote. Faithful translation is allowed. Return one verdict for each input id. When uncertain, reject.',
+      model: process.env.OPENAI_VERIFIER_MODEL || 'gpt-5.4',
+      instructions: 'You are an independent, strict fact checker. For EACH input object, copy its id exactly into one verdict. Judge whether its quote alone supports every detail in its claim. Do not use other input quotes, article titles, or outside knowledge; treat each object independently. Reject if a timing phrase, attribution, entity, event, cause, or material detail is absent from that SAME quote, even if plausible. If the quote says only "the fund" or "the company" and the claim names an ETF, ticker, or company absent from the quote, reject. Faithful translation is allowed. Return one verdict for each input id. When uncertain, reject.',
       input: JSON.stringify({ claims }),
       text: { format: { type: 'json_schema', name: 'claim_verdicts', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['verdicts'],
@@ -127,26 +127,30 @@ async function verifyQuotedClaims(factCards, apiKey) {
 
 async function modelSegments(articles, listener, asOf, apiKey, numericFree = false) {
   const targetStories = Math.min(4, new Set(articles.map((article) => article.eventGroup)).size);
+  const evidenceByArticle = new Map(articles.map((article) => [article.id,
+    [...new Intl.Segmenter(article.language, { granularity: 'sentence' }).segment(article.text.slice(0, 1800))]
+      .map((part) => part.segment.trim()).filter((sentence) => sentence.length >= 12 && sentence.length <= 250),
+  ]));
   const source = articles.map((article) => ({
     articleId: article.id,
     eventGroup: article.eventGroup,
     outlet: article.outlet,
     headline: article.headline,
     date: article.date,
-    passage: article.text.slice(0, 1800),
+    sentences: evidenceByArticle.get(article.id),
   }));
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
-      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one short spoken factual sentence of about 12-24 words for EACH distinct eventGroup, in order, up to targetStories. Prefer one simple clause over a long explanation. Do not collapse the whole briefing into one sentence. Use only the supplied article headlines and passages. For a mixed-topic article, speak only about the angle relevant to the listener's topics; do not lead with an unrelated headline item. Merge duplicate coverage within an event. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. Each segment must make ONE atomic claim from ONE cited article. Copy one exact contiguous evidence quote of 12-250 characters from that article passage that supports EVERY detail, entity and attribution in the spoken sentence; a headline-only quote is insufficient when the sentence adds detail. Before returning, compare each spoken sentence against its quote alone: remove every detail that a strict independent fact checker could not find in that quote. Do not combine separate passages, add a cause or market reaction, or change a forecast into an observed event. If a detail is not explicit in the evidence quote, omit it. Every segment must name the articleId. Every numeric expression in the spoken text must also appear in that evidence quote with the same value and unit; otherwise omit the number. Keep entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the exact evidence quote.' : ''}`,
+      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one short spoken factual sentence of about 12-24 words for EACH distinct eventGroup, in order, up to targetStories. Prefer one simple clause. Use only the supplied article headlines and numbered source sentences. For a mixed-topic article, speak only about the angle relevant to the listener's topics. Merge duplicate coverage within an event. If outlets genuinely disagree, attribute the disagreement. Each segment must make ONE atomic claim supported by ONE numbered source sentence from ONE cited article; return its zero-based evidenceIndex. That single sentence must support EVERY entity, number, time, cause and attribution in your spoken sentence. Before returning, compare each spoken sentence against only its selected source sentence and remove unsupported details. Do not combine separate sentences, add a market reaction, or change a forecast into an observed event. If a detail is not explicit in the source sentence, omit it. Every segment must name the articleId. Keep numbers and units exact. Attribute uncertain reports. No investment advice. Do not copy whole source sentences into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the selected source sentence.' : ''}`,
       input: JSON.stringify({ listener: { language: listener.language, topics: listener.topics, depth: listener.depth, maxMinutes: listener.maxMinutes }, asOf, targetStories, articles: source }),
       text: { format: { type: 'json_schema', name: 'briefing_segments', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['segments'],
         properties: { segments: { type: 'array', items: {
-          type: 'object', additionalProperties: false, required: ['text', 'articleId', 'evidenceQuote'],
-          properties: { text: { type: 'string' }, articleId: { type: 'string' }, evidenceQuote: { type: 'string' } },
+          type: 'object', additionalProperties: false, required: ['text', 'articleId', 'evidenceIndex'],
+          properties: { text: { type: 'string' }, articleId: { type: 'string' }, evidenceIndex: { type: 'integer' } },
         } } },
       } } },
     }),
@@ -163,18 +167,21 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
   const seenEvents = new Set();
   for (const candidate of parsed.segments ?? []) {
     const article = byId.get(candidate.articleId);
-    const reason = article ? modelSegmentFailure(candidate, article, listener) : 'unknown_article';
+    const indexedQuote = Number.isInteger(candidate.evidenceIndex)
+      ? evidenceByArticle.get(candidate.articleId)?.[candidate.evidenceIndex] : undefined;
+    const checkedCandidate = indexedQuote ? { ...candidate, evidenceQuote: indexedQuote } : candidate;
+    const reason = article ? modelSegmentFailure(checkedCandidate, article, listener) : 'unknown_article';
     if (reason) { rejected[reason] = (rejected[reason] ?? 0) + 1; continue; }
     if (seenEvents.has(article.eventGroup)) { rejected.duplicate_event = (rejected.duplicate_event ?? 0) + 1; continue; }
     seenEvents.add(article.eventGroup);
-    const id = factId(article.id, candidate.evidenceQuote.trim());
+    const id = factId(article.id, checkedCandidate.evidenceQuote.trim());
     segments.push({
       text: candidate.text.trim(),
       factIds: [id],
       sources: [{ articleId: article.id, title: article.headline, url: article.url }],
     });
     factCards.push({ factId: id, eventGroup: article.eventGroup, articleId: article.id,
-      sourceUrl: article.url, articleDate: article.date, evidenceQuote: candidate.evidenceQuote.trim(),
+      sourceUrl: article.url, articleDate: article.date, evidenceQuote: checkedCandidate.evidenceQuote.trim(),
       spokenText: candidate.text.trim(), numericExpressions: numericExpressions(candidate.text),
       reviewStatus: 'needs-editorial-review' });
   }
@@ -202,6 +209,8 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
     usage: {
       modelInputTokens: (body.usage?.input_tokens ?? 0) + verifierUsage.modelInputTokens,
       modelOutputTokens: (body.usage?.output_tokens ?? 0) + verifierUsage.modelOutputTokens,
+      verifierInputTokens: verifierUsage.modelInputTokens,
+      verifierOutputTokens: verifierUsage.modelOutputTokens,
     },
   };
 }
@@ -229,6 +238,25 @@ function headlineFallback(articles, language) {
   return { segments, factCards };
 }
 
+function verifiedAndHeadlineFallback(articles, language, candidate) {
+  if (!candidate?.factCards.length) return headlineFallback(articles, language);
+  const acceptedByArticle = new Map(candidate.factCards.map((card, index) => [card.articleId, index]));
+  const segments = [];
+  const factCards = [];
+  for (const article of articles) {
+    const acceptedIndex = acceptedByArticle.get(article.id);
+    if (acceptedIndex !== undefined) {
+      segments.push(candidate.segments[acceptedIndex]);
+      factCards.push(candidate.factCards[acceptedIndex]);
+    } else {
+      const fallback = headlineFallback([article], language);
+      segments.push(fallback.segments[0]);
+      factCards.push(fallback.factCards[0]);
+    }
+  }
+  return { segments, factCards };
+}
+
 export async function makeScript(groups, rawListener, asOf, apiKey = process.env.OPENAI_API_KEY) {
   const listener = validateListener(rawListener);
   const articles = selectArticles(groups, listener, asOf);
@@ -236,9 +264,10 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
   let topicMatchStatus = !listener.topics.length || rankGroups(groups, listener, asOf).some((group) => group.topicHits > 0)
     ? 'matched' : 'general-fallback';
   let result;
+  let partialCandidate;
   let generationMode = 'source-headline-fallback';
   let modelStatus = 'key_missing';
-  let modelUsage = { modelInputTokens: 0, modelOutputTokens: 0 };
+  let modelUsage = { modelInputTokens: 0, modelOutputTokens: 0, verifierInputTokens: 0, verifierOutputTokens: 0 };
   if (apiKey) {
     try {
       const context = addIndependentCoverage(groups, articles, asOf);
@@ -249,11 +278,14 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
         modelUsage = {
           modelInputTokens: modelUsage.modelInputTokens + retry.usage.modelInputTokens,
           modelOutputTokens: modelUsage.modelOutputTokens + retry.usage.modelOutputTokens,
+          verifierInputTokens: modelUsage.verifierInputTokens + retry.usage.verifierInputTokens,
+          verifierOutputTokens: modelUsage.verifierOutputTokens + retry.usage.verifierOutputTokens,
         };
         if (retry.distinctEventCount > candidate.distinctEventCount) candidate = retry;
       }
+      partialCandidate = candidate;
       if (candidate.distinctEventCount >= candidate.requiredEventCount) {
-        result = candidate;
+        result = { ...candidate, usage: modelUsage };
         generationMode = 'source-checked-model';
         modelStatus = 'ok';
       } else {
@@ -269,7 +301,7 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
     if (listener.topics.length && !rankGroups(groups, listener, asOf).some((group) => group.topicHits > 0 && group.articles.some((article) => article.language === listener.language))) {
       topicMatchStatus = 'general-fallback';
     }
-    result = { ...headlineFallback(nativeLanguage, listener.language), usage: modelUsage };
+    result = { ...verifiedAndHeadlineFallback(nativeLanguage, listener.language, partialCandidate), usage: modelUsage };
   }
   const introduction = listener.language === 'de'
     ? 'Guten Morgen. Diese Zusammenfassung wird von einer synthetischen Stimme gesprochen.'
