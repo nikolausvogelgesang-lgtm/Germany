@@ -41,3 +41,5 @@ Person A owns changes to this contract. Person B builds the UI against `fixtures
 ```
 
 `audioUrl` and `durationSeconds` may be `null` while audio generation is pending or in the labelled synthetic UI fixture. The real endpoint must include a source for every factual segment. Nonfactual transitions may have empty `factIds` and `sources`. UI must show explicit loading/error states and synthetic-voice disclosure.
+
+The real endpoint also adds `generationMode` (`source-checked-model` or `source-headline-fallback`), `modelStatus` (`ok`, `key_missing`, or a sanitized validation/provider error) and `audioStatus` (`generated`, `cached`, `key_missing`, or a sanitized provider error). These are diagnostic fields. A `null` audio URL means **audio is not ready**, so the demo must not claim that a playable briefing exists yet. A fallback response must be labelled as such in the UI.
