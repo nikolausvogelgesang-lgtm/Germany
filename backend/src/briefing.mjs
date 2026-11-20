@@ -63,21 +63,25 @@ const numericExpressions = (text) => (text.match(NUMBER) ?? []).map((value) => {
   return `${currency}${unit}`;
 });
 
-function modelSegmentFailure(candidate, article) {
+function modelSegmentFailure(candidate, article, listener) {
   if (!candidate || typeof candidate.text !== 'string' || typeof candidate.evidenceQuote !== 'string') return 'invalid_shape';
   const claim = candidate.text.trim();
   const quote = candidate.evidenceQuote.trim();
   if (claim.length < 20 || claim.length > 280 || quote.length < 12 || quote.length > 250) return 'invalid_length';
+  if (['de', 'nl'].includes(listener?.language) && (claim.match(/\b(the|while|despite|reports|prices|after|with|was|were|had|said|that|year|but|will|remain|under|increased|revenues|executives)\b/gi) ?? []).length >= 2) return 'wrong_language';
+  if (listener?.topics.some((topic) => /^(energie|energy|öl|oil)$/i.test(topic)) && !/(?:öl|oil|brent|rohöl|energie|energy|erdgas|gaspreis)/i.test(claim)) return 'off_topic';
+  if (quoteMatchText(claim) === quoteMatchText(quote) && claim.split(/\s+/).length > 18) return 'copied_passage';
+  if (quote.split(/\s+/).length < Math.max(6, Math.ceil(claim.split(/\s+/).length / 2))) return 'insufficient_evidence_quote';
   const excerpt = quoteMatchText(quote);
-  if (!quoteMatchText(article.text).includes(excerpt) && !quoteMatchText(article.headline).includes(excerpt)) return 'quote_not_in_source';
+  if (!quoteMatchText(article.text.slice(0, 1800)).includes(excerpt)) return 'quote_not_in_source';
   const claimNumbers = numericExpressions(claim);
   const quoteNumbers = new Set(numericExpressions(quote));
   if (!claimNumbers.every((number) => quoteNumbers.has(number))) return 'number_or_unit_mismatch';
   return null;
 }
 
-export function validateModelSegment(candidate, article) {
-  return modelSegmentFailure(candidate, article) === null;
+export function validateModelSegment(candidate, article, listener) {
+  return modelSegmentFailure(candidate, article, listener) === null;
 }
 
 async function modelSegments(articles, listener, asOf, apiKey, numericFree = false) {
@@ -95,7 +99,7 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
-      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one spoken factual sentence of about 20-35 words for EACH distinct eventGroup, in order, up to targetStories. Do not collapse the whole briefing into one sentence. Use only the supplied article headlines and passages. For a mixed-topic article, speak only about the angle relevant to the listener's topics; do not lead with an unrelated headline item. Merge duplicate coverage within an event. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. Every segment must name one articleId and copy a short exact evidence quote from that article headline OR supplied passage. Every numeric expression in the spoken text must also appear in that evidence quote with the same value and unit; otherwise omit the number. Keep entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the exact evidence quote.' : ''}`,
+      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one spoken factual sentence of about 20-35 words for EACH distinct eventGroup, in order, up to targetStories. Do not collapse the whole briefing into one sentence. Use only the supplied article headlines and passages. For a mixed-topic article, speak only about the angle relevant to the listener's topics; do not lead with an unrelated headline item. Merge duplicate coverage within an event. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. Each segment must make ONE atomic claim from ONE cited article. Copy one exact contiguous evidence quote from that article passage that supports EVERY clause of the spoken sentence; a headline-only quote is insufficient when the sentence adds detail. Do not combine separate passages, add a cause or market reaction, or change a forecast into an observed event. If a detail is not explicit in the evidence quote, omit it. Every segment must name the articleId. Every numeric expression in the spoken text must also appear in that evidence quote with the same value and unit; otherwise omit the number. Keep entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the exact evidence quote.' : ''}`,
       input: JSON.stringify({ listener: { language: listener.language, topics: listener.topics, depth: listener.depth, maxMinutes: listener.maxMinutes }, asOf, targetStories, articles: source }),
       text: { format: { type: 'json_schema', name: 'briefing_segments', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['segments'],
@@ -115,10 +119,13 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
   const segments = [];
   const factCards = [];
   const rejected = {};
+  const seenEvents = new Set();
   for (const candidate of parsed.segments ?? []) {
     const article = byId.get(candidate.articleId);
-    const reason = article ? modelSegmentFailure(candidate, article) : 'unknown_article';
+    const reason = article ? modelSegmentFailure(candidate, article, listener) : 'unknown_article';
     if (reason) { rejected[reason] = (rejected[reason] ?? 0) + 1; continue; }
+    if (seenEvents.has(article.eventGroup)) { rejected.duplicate_event = (rejected.duplicate_event ?? 0) + 1; continue; }
+    seenEvents.add(article.eventGroup);
     const id = factId(article.id, candidate.evidenceQuote.trim());
     segments.push({
       text: candidate.text.trim(),
