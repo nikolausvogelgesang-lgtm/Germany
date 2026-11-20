@@ -53,7 +53,9 @@ const server = createServer(async (request, response) => {
     try {
       const start = Date.now();
       const input = await readJson(request);
-      const asOf = input.asOf ? new Date(input.asOf).toISOString() : new Date().toISOString();
+      const asOfDate = input.asOf ? new Date(input.asOf) : new Date();
+      if (!Number.isFinite(asOfDate.getTime())) throw new Error('Invalid asOf date');
+      const asOf = asOfDate.toISOString();
       const script = await makeScript(groups, input.listener, asOf);
       const scriptMs = Date.now() - start;
       let audio;
@@ -64,6 +66,7 @@ const server = createServer(async (request, response) => {
         id: `briefing-${Date.now()}`,
         asOf,
         profileSummary: `${script.listener.language.toUpperCase()} · ${script.listener.topics.join(', ') || 'general'} · ${script.listener.depth}`,
+        topicMatchStatus: script.topicMatchStatus,
         segments: script.segments,
         audioUrl: audio.audioUrl,
         durationSeconds: null,
