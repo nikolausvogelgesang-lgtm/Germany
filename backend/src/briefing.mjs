@@ -48,16 +48,20 @@ function addIndependentCoverage(groups, primaries, asOf) {
   return selected;
 }
 
-const NUMBER = /(?<![a-z0-9])[$€£]?\d+(?:[.,]\d+)*(?:\s?(?:%|percentage points?|prozentpunkte?|procentpunten?|basis points?|basispunkte?|basispunten?|percent|prozent|procent|millionen?|miljoen|milliarden?|miljard|billion|trillion))?/gi;
+const NUMBER = /(?<![a-z0-9])(?:[$€£]\s*)?\d+(?:[.,]\d+)*(?:\s?(?:%|percentage points?|prozentpunkte?|procentpunten?|basis points?|basispunkte?|basispunten?|percent|prozent|procent|millionen?|miljoen|milliarden?|miljard|billion|trillion))?(?:\s*[$€£])?/gi;
 const normalized = (text) => text.toLowerCase().replace(/\s+/g, ' ').trim();
 const quoteMatchText = (text) => text.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
-const numericExpressions = (text) => (text.match(NUMBER) ?? []).map((value) => normalized(value)
+const numericExpressions = (text) => (text.match(NUMBER) ?? []).map((value) => {
+  const currency = value.match(/[$€£]/)?.[0] ?? '';
+  const unit = normalized(value).replace(/[$€£]/g, '').trim()
   .replace(/\s*(?:%|percent|prozent|procent)$/, ' percent')
   .replace(/\s*(?:millionen?|miljoen)$/, ' million')
   .replace(/\s*(?:milliarden?|miljard)$/, ' billion')
   .replace(/\s*(?:prozentpunkte?|procentpunten?)$/, ' percentage points')
   .replace(/\s*(?:basispunkte?|basispunten?)$/, ' basis points')
-  .replace(/,(?=\d)/g, '.'));
+  .replace(/,(?=\d)/g, '.');
+  return `${currency}${unit}`;
+});
 
 function modelSegmentFailure(candidate, article) {
   if (!candidate || typeof candidate.text !== 'string' || typeof candidate.evidenceQuote !== 'string') return 'invalid_shape';
@@ -158,6 +162,8 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
   const listener = validateListener(rawListener);
   const articles = selectArticles(groups, listener, asOf);
   if (!articles.length) throw new Error('No eligible articles for this listener and date');
+  let topicMatchStatus = !listener.topics.length || rankGroups(groups, listener, asOf).some((group) => group.topicHits > 0)
+    ? 'matched' : 'general-fallback';
   let result;
   let generationMode = 'source-headline-fallback';
   let modelStatus = 'key_missing';
@@ -189,6 +195,9 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
   if (!result) {
     const nativeLanguage = selectArticles(groups, listener, asOf, { nativeOnly: true });
     if (!nativeLanguage.length) throw new Error(`No ${listener.language} source headlines available for fallback`);
+    if (listener.topics.length && !rankGroups(groups, listener, asOf).some((group) => group.topicHits > 0 && group.articles.some((article) => article.language === listener.language))) {
+      topicMatchStatus = 'general-fallback';
+    }
     result = { ...headlineFallback(nativeLanguage), usage: modelUsage };
   }
   const introduction = listener.language === 'de'
@@ -196,12 +205,18 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
     : listener.language === 'nl'
       ? 'Goedemorgen. Deze briefing wordt voorgelezen door een synthetische stem.'
       : 'Good morning. This briefing is spoken by a synthetic voice.';
+  const noMatch = topicMatchStatus === 'general-fallback'
+    ? listener.language === 'de' ? 'Für deine Themen fand ich in diesem Datensatz keine eindeutig passende Meldung. Hier sind allgemeine Nachrichten.'
+      : listener.language === 'nl' ? 'Ik vond in deze dataset geen duidelijk passend bericht over jouw onderwerpen. Hier is algemeen nieuws.'
+        : 'I found no clear match for your topics in this dataset. Here is general news.'
+    : '';
   return {
     listener,
+    topicMatchStatus,
     generationMode,
     modelStatus,
     factCards: result.factCards,
-    segments: [{ text: introduction, factIds: [], sources: [] }, ...result.segments],
+    segments: [{ text: noMatch ? `${introduction} ${noMatch}` : introduction, factIds: [], sources: [] }, ...result.segments],
     usage: result.usage,
   };
 }

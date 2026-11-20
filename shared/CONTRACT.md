@@ -46,4 +46,6 @@ The real endpoint also adds `generationMode` (`source-checked-model` or `source-
 
 The live endpoint also reports `scriptMs` and `ttsMs` alongside `generationMs`. `usage.ttsCharacters` is zero on a cached MP3, because that request did not call ElevenLabs. These fields let the team show measured wildcard latency and API consumption; they do not claim a currency cost.
 
+`topicMatchStatus` is `matched` or `general-fallback`. When an unseen topic has no clear headline match in the supplied dataset, the briefing explicitly says it is general news; the UI should show the same label instead of presenting it as topical personalization.
+
 The backend writes a private, ignored `generated/fact-audit.jsonl` record for each briefing. Each fact card contains its stable fact ID, source article ID and URL, short evidence quote, spoken wording, numeric expressions and `needs-editorial-review` status. This is an audit queue for Person B's three-claim check; automated quote and number checks alone do not certify that a paraphrase preserves the source's meaning. The API response still exposes only the spoken sentence, fact ID and source link.

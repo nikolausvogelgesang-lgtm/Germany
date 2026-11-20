@@ -15,6 +15,9 @@ test('numeric claim needs the exact number in a real supporting passage', () => 
   assert.equal(validateModelSegment({ text: 'The report says producer prices rose 0.3% in October.', evidenceQuote: 'A made-up passage said prices rose 0.3%.' }, source), false);
   assert.equal(validateModelSegment({ text: 'The report says producer prices rose 0.3 points in October.', evidenceQuote: 'Producer prices rose 0.3% in October.' }, source), false);
   assert.equal(validateModelSegment({ text: 'Dem Bericht zufolge stiegen die Erzeugerpreise im Oktober um 0,3 Prozent.', evidenceQuote: 'Producer prices rose 0.3% in October.' }, source), true);
+  const oil = article('oil', 'Brent price update', 'Brent oil fell toward 90 $ per barrel.', '2026-11-18T12:00:00Z');
+  assert.equal(validateModelSegment({ text: 'Brent oil fell toward $90 per barrel.', evidenceQuote: 'Brent oil fell toward 90 $ per barrel.' }, oil), true);
+  assert.equal(validateModelSegment({ text: 'Brent oil fell toward 90 € per barrel.', evidenceQuote: 'Brent oil fell toward 90 $ per barrel.' }, oil), false);
 });
 
 test('two listener interests produce different source-backed fallback stories', async () => {
@@ -39,14 +42,22 @@ test('energy listener skips a soybean-led mixed commodity article when oil stori
   assert.deepEqual(chosen.map((item) => item.id), ['oil']);
 });
 
+test('an unmatched wildcard is explicitly labelled as general news', async () => {
+  const groups = [[article('fx', 'Dollar rises against the yen', 'The dollar rose.', '2026-11-18T12:00:00Z')]];
+  const result = await makeScript(groups, { language: 'en', topics: ['volcanic insurance'], maxMinutes: 1 }, '2026-11-19T23:59:59Z', '');
+  assert.equal(result.topicMatchStatus, 'general-fallback');
+  assert.match(result.segments[0].text, /general news/);
+});
+
 test('fallback never presents English headlines as a German briefing', async () => {
   const asOf = '2026-11-19T23:59:59Z';
   const groups = [
     [article('en', 'Currency markets react to central bank', 'Currency markets reacted.', '2026-11-18T12:00:00Z')],
     [article('de', 'Deutsche Zentralbank meldet neue Entscheidung', 'Die Zentralbank meldete eine Entscheidung.', '2026-11-18T12:01:00Z', 'de')],
   ];
-  const result = await makeScript(groups, { language: 'de', topics: [], maxMinutes: 1 }, asOf, '');
+  const result = await makeScript(groups, { language: 'de', topics: ['currency'], maxMinutes: 1 }, asOf, '');
   assert.deepEqual(result.segments.flatMap((s) => s.sources.map((x) => x.articleId)), ['de']);
+  assert.equal(result.topicMatchStatus, 'general-fallback');
 });
 
 test('model output is accepted only when its quote supports the numeric claim', async () => {
