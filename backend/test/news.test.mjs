@@ -38,6 +38,17 @@ test('editorial event aliases join cross-outlet reports without merging unrelate
   assert.equal(diagnostics.curatedPairs, 1);
 });
 
+test('groups the Musk return campaign across outlets but not a separate Nvidia leadership story', () => {
+  const rows = [
+    article('petition', 'Elon Musk Joins Petition To Reinstate Jensen Huang', '2026-11-14T18:50:00Z', { outlet: 'IBTimes', feed: 'ibtimes_uk.jsonl' }),
+    article('campaign', 'Nvidia stock faces a new Jensen Huang crisis as Elon Musk enters the fight', '2026-11-16T07:16:00Z'),
+    article('board', 'Nvidia board rules out Huang return', '2026-11-16T19:40:00Z'),
+  ];
+  const { groups } = groupArticles(rows);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.find((group) => group.length === 2).map((item) => item.id).sort(), ['campaign', 'petition']);
+});
+
 test('FX listener does not mistake ordinary bank outages for central-bank news', () => {
   const rows = [
     article('outage', 'Chase bank users report login outage', '2026-11-18T12:00:00Z'),
