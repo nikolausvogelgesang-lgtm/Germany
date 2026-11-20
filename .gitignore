@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+data/private/
+cache/
+generated/
+*.jsonl
+*.zip
+*.mp3
+*.wav
+.DS_Store
