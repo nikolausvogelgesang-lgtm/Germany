@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { rankGroups } from './news.mjs';
 
-const MAX_STORIES = 4;
+const MAX_STORIES = 3;
 
 function factId(articleId, text) {
   return `fact-${createHash('sha256').update(`${articleId}\n${text}`).digest('hex').slice(0, 16)}`;
@@ -27,7 +27,8 @@ export function selectArticles(groups, listener, asOf, { nativeOnly = false } = 
     : available;
   const energyProfile = listener.topics.some((topic) => /^(energie|energy|öl|oil)$/i.test(topic));
   const focused = energyProfile
-    ? relevant.filter((item) => !item.articles.some((article) => /^(?:sojabohnenpreis|soybean price)\s*:/i.test(article.headline)))
+    ? relevant.filter((item) => item.articles.some((article) => /(?:öl|oil|brent|rohöl|energie|energy|erdgas|gaspreis|crude|wti)/iu.test(article.headline.slice(0, 40)))
+      && !item.articles.some((article) => /^(?:sojabohnenpreis|soybean price)\s*:/i.test(article.headline)))
     : relevant;
   const maximum = Math.min(MAX_STORIES, Math.max(2, Math.ceil(listener.maxMinutes * (listener.depth === 'deep' ? 1.1 : 1.8))));
   return (focused.length ? focused : relevant).slice(0, maximum).map((group) => group.articles
@@ -101,7 +102,7 @@ async function verifyQuotedClaims(factCards, apiKey) {
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       model: process.env.OPENAI_VERIFIER_MODEL || 'gpt-5.4',
-      instructions: 'You are an independent, strict fact checker. For EACH input object, copy its id exactly into one verdict. Judge whether its quote alone supports every detail in its claim. Do not use other input quotes, article titles, or outside knowledge; treat each object independently. Reject if a timing phrase, attribution, entity, event, cause, or material detail is absent from that SAME quote, even if plausible. If the quote says only "the fund" or "the company" and the claim names an ETF, ticker, or company absent from the quote, reject. Faithful translation is allowed. Return one verdict for each input id. When uncertain, reject.',
+      instructions: 'You are an independent, strict fact checker. For EACH input object, copy its id exactly into one verdict. Judge whether its quote alone supports every detail in its claim. Do not use other input quotes, article titles, or outside knowledge; treat each object independently. Reject if a timing phrase, attribution, entity, event, cause, or material detail is absent from that SAME quote, even if plausible. Market pressure, a forecast or a risk of falling does NOT prove an observed price fall. If the quote says only "the fund", "the company" or "Brent" and the claim names a specific ETF, ticker, company or futures contract absent from the quote, reject. Faithful translation is allowed. Return one verdict for each input id. When uncertain, reject.',
       input: JSON.stringify({ claims }),
       text: { format: { type: 'json_schema', name: 'claim_verdicts', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['verdicts'],
@@ -143,8 +144,8 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
-      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one short spoken factual sentence of about 12-24 words for EACH distinct eventGroup, in order, up to targetStories. Prefer one simple clause. Use only the supplied article headlines and numbered source sentences. For a mixed-topic article, speak only about the angle relevant to the listener's topics. Merge duplicate coverage within an event. If outlets genuinely disagree, attribute the disagreement. Each segment must make ONE atomic claim supported by ONE numbered source sentence from ONE cited article; return its zero-based evidenceIndex. That single sentence must support EVERY entity, number, time, cause and attribution in your spoken sentence. Before returning, compare each spoken sentence against only its selected source sentence and remove unsupported details. Do not combine separate sentences, add a market reaction, or change a forecast into an observed event. If a detail is not explicit in the source sentence, omit it. Every segment must name the articleId. Keep numbers and units exact. Attribute uncertain reports. No investment advice. Do not copy whole source sentences into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the selected source sentence.' : ''}`,
+      model: numericFree ? (process.env.OPENAI_REPAIR_MODEL || 'gpt-5.4') : (process.env.OPENAI_MODEL || 'gpt-5.4-mini'),
+      instructions: `Write a useful multi-story financial news audio briefing in the listener language. The articles are ordered by relevance and tagged with eventGroup. Write one short spoken factual sentence of about 12-24 words for EACH distinct eventGroup, in order, up to targetStories. Prefer one simple clause. Use only the supplied article headlines and numbered source sentences. For a mixed-topic article, speak only about the angle relevant to the listener's topics. Merge duplicate coverage within an event. If outlets genuinely disagree, attribute the disagreement. Each segment must make ONE atomic claim supported by ONE numbered source sentence from ONE cited article; return its zero-based evidenceIndex. That single sentence must support EVERY entity, number, time, cause and attribution in your spoken sentence. Before returning, compare each spoken sentence against only its selected source sentence and remove unsupported details. Do not combine separate sentences, add a market reaction, or change a forecast or market pressure into an observed price move. If a detail is not explicit in the source sentence, omit it. Every segment must name the articleId. Keep numbers and units exact. Attribute uncertain reports. No investment advice. Do not copy whole source sentences into the spoken text. Return JSON only.${numericFree ? ' STRICT RETRY: Do not include any digits, percentages, quantities, years or other numeric expressions in spoken text. Write only qualitative claims directly supported by the selected source sentence.' : ''}`,
       input: JSON.stringify({ listener: { language: listener.language, topics: listener.topics, depth: listener.depth, maxMinutes: listener.maxMinutes }, asOf, targetStories, articles: source }),
       text: { format: { type: 'json_schema', name: 'briefing_segments', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['segments'],
@@ -211,6 +212,8 @@ async function modelSegments(articles, listener, asOf, apiKey, numericFree = fal
       modelOutputTokens: (body.usage?.output_tokens ?? 0) + verifierUsage.modelOutputTokens,
       verifierInputTokens: verifierUsage.modelInputTokens,
       verifierOutputTokens: verifierUsage.modelOutputTokens,
+      repairInputTokens: numericFree ? body.usage?.input_tokens ?? 0 : 0,
+      repairOutputTokens: numericFree ? body.usage?.output_tokens ?? 0 : 0,
     },
   };
 }
@@ -219,10 +222,11 @@ function headlineFallback(articles, language) {
   // Emergency, explicitly attributed short headline quotes; never read article bodies aloud.
   const spokenHeadline = (article) => {
     const headline = article.headline.trim();
+    const outlet = article.outlet.replace(/\s*-\s*(?:German|Dutch|English)\s*$/i, '');
     const end = /[.!?]$/.test(headline) ? '' : '.';
-    if (language === 'de') return `${article.outlet} berichtet: „${headline}${end}“`;
-    if (language === 'nl') return `${article.outlet} meldt: „${headline}${end}”`;
-    return `${article.outlet} reports: “${headline}${end}”`;
+    if (language === 'de') return `${outlet} berichtet: „${headline}${end}“`;
+    if (language === 'nl') return `${outlet} meldt: „${headline}${end}”`;
+    return `${outlet} reports: “${headline}${end}”`;
   };
   const segments = articles.map((article) => ({
     text: spokenHeadline(article),
@@ -267,7 +271,7 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
   let partialCandidate;
   let generationMode = 'source-headline-fallback';
   let modelStatus = 'key_missing';
-  let modelUsage = { modelInputTokens: 0, modelOutputTokens: 0, verifierInputTokens: 0, verifierOutputTokens: 0 };
+  let modelUsage = { modelInputTokens: 0, modelOutputTokens: 0, verifierInputTokens: 0, verifierOutputTokens: 0, repairInputTokens: 0, repairOutputTokens: 0 };
   if (apiKey) {
     try {
       const context = addIndependentCoverage(groups, articles, asOf);
@@ -280,6 +284,8 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
           modelOutputTokens: modelUsage.modelOutputTokens + retry.usage.modelOutputTokens,
           verifierInputTokens: modelUsage.verifierInputTokens + retry.usage.verifierInputTokens,
           verifierOutputTokens: modelUsage.verifierOutputTokens + retry.usage.verifierOutputTokens,
+          repairInputTokens: modelUsage.repairInputTokens + retry.usage.repairInputTokens,
+          repairOutputTokens: modelUsage.repairOutputTokens + retry.usage.repairOutputTokens,
         };
         if (retry.distinctEventCount > candidate.distinctEventCount) candidate = retry;
       }

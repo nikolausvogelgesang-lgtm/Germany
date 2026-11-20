@@ -190,7 +190,7 @@ export default function App() {
           )}
           {result.generationMode === 'source-headline-fallback' && (
             <p className="badge">
-              source-headline-fallback — source headlines used instead of a validated model script.
+              Some stories use attributed source headlines where a spoken claim did not pass verification.
             </p>
           )}
           {result.topicMatchStatus === 'general-fallback' && (
