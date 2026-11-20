@@ -19,19 +19,34 @@ export function validateListener(listener) {
   return { language, topics, depth, maxMinutes, heardFactIds };
 }
 
-export function selectArticles(groups, listener, asOf) {
+export function selectArticles(groups, listener, asOf, { nativeOnly = false } = {}) {
   const ranked = rankGroups(groups, listener, asOf);
-  const relevant = listener.topics.length && ranked.some((item) => item.topicHits > 0)
-    ? ranked.filter((item) => item.topicHits > 0)
-    : ranked;
+  const available = nativeOnly ? ranked.filter((item) => item.articles.some((article) => article.language === listener.language)) : ranked;
+  const relevant = listener.topics.length && available.some((item) => item.topicHits > 0)
+    ? available.filter((item) => item.topicHits > 0)
+    : available;
   const maximum = Math.min(MAX_STORIES, Math.max(2, Math.ceil(listener.maxMinutes * (listener.depth === 'deep' ? 1.1 : 1.8))));
   return relevant.slice(0, maximum).map((group) => group.articles
     .slice()
     .sort((a, b) => Number(b.language === listener.language) - Number(a.language === listener.language) || b.dateMs - a.dateMs || a.id.localeCompare(b.id))[0]);
 }
 
-const NUMBER = /\b\d+(?:[.,]\d+)*%?\b/g;
+function addIndependentCoverage(groups, primaries, asOf) {
+  const cutoff = Date.parse(asOf);
+  const selected = [];
+  for (const primary of primaries) {
+    selected.push(primary);
+    const group = groups.find((items) => items.some((item) => item.id === primary.id));
+    const secondary = group?.filter((item) => item.outlet !== primary.outlet && item.dateMs <= cutoff)
+      .sort((a, b) => b.dateMs - a.dateMs)[0];
+    if (secondary) selected.push(secondary);
+  }
+  return selected;
+}
+
+const NUMBER = /(?<![a-z0-9])[$€£]?\d+(?:[.,]\d+)*(?:\s?(?:%|percent|percentage points?|basis points?|million|billion|trillion))?/gi;
 const normalized = (text) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+const numericExpressions = (text) => (text.match(NUMBER) ?? []).map((value) => normalized(value).replace(/\s*%$/, ' percent'));
 
 export function validateModelSegment(candidate, article) {
   if (!candidate || typeof candidate.text !== 'string' || typeof candidate.evidenceQuote !== 'string') return false;
@@ -39,8 +54,8 @@ export function validateModelSegment(candidate, article) {
   const quote = candidate.evidenceQuote.trim();
   if (claim.length < 20 || claim.length > 280 || quote.length < 12 || quote.length > 250) return false;
   if (!normalized(article.text).includes(normalized(quote))) return false;
-  const claimNumbers = claim.match(NUMBER) ?? [];
-  const quoteNumbers = new Set(quote.match(NUMBER) ?? []);
+  const claimNumbers = numericExpressions(claim);
+  const quoteNumbers = new Set(numericExpressions(quote));
   return claimNumbers.every((number) => quoteNumbers.has(number));
 }
 
@@ -50,14 +65,14 @@ async function modelSegments(articles, listener, asOf, apiKey) {
     outlet: article.outlet,
     headline: article.headline,
     date: article.date,
-    passage: article.text.slice(0, 4000),
+    passage: article.text.slice(0, 1800),
   }));
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || 'gpt-4.1-mini',
-      instructions: 'Write a short financial news audio briefing in the listener language. Use only the supplied source passages. One concise factual sentence per segment. Every segment must name one articleId and copy a short exact evidence quote from that article passage. Keep every number, unit, entity and time period exact. Attribute uncertain reports and source disagreement. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.',
+      instructions: 'Write a short financial news audio briefing in the listener language. Use only the supplied source passages. Articles about the same event may come from different outlets; merge duplicate coverage. If outlets genuinely disagree, give separate attributed sentences rather than inventing a resolution. One concise factual sentence per segment. Every segment must name one articleId and copy a short exact evidence quote from that article passage. Keep every number, unit, entity and time period exact. Attribute uncertain reports. No investment advice. Do not copy whole sentences from articles into the spoken text. Return JSON only.',
       input: JSON.stringify({ listener: { language: listener.language, topics: listener.topics, depth: listener.depth, maxMinutes: listener.maxMinutes }, asOf, articles: source }),
       text: { format: { type: 'json_schema', name: 'briefing_segments', strict: true, schema: {
         type: 'object', additionalProperties: false, required: ['segments'],
@@ -106,7 +121,7 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
   let modelStatus = 'key_missing';
   if (apiKey) {
     try {
-      result = await modelSegments(articles, listener, asOf, apiKey);
+      result = await modelSegments(addIndependentCoverage(groups, articles, asOf), listener, asOf, apiKey);
       generationMode = 'source-checked-model';
       modelStatus = 'ok';
     } catch (error) {
@@ -114,8 +129,9 @@ export async function makeScript(groups, rawListener, asOf, apiKey = process.env
     }
   }
   if (!result) {
-    const nativeLanguage = articles.filter((article) => article.language === listener.language);
-    result = { segments: headlineFallback(nativeLanguage.length ? nativeLanguage : articles), usage: { modelInputTokens: 0, modelOutputTokens: 0 } };
+    const nativeLanguage = selectArticles(groups, listener, asOf, { nativeOnly: true });
+    if (!nativeLanguage.length) throw new Error(`No ${listener.language} source headlines available for fallback`);
+    result = { segments: headlineFallback(nativeLanguage), usage: { modelInputTokens: 0, modelOutputTokens: 0 } };
   }
   const introduction = listener.language === 'de'
     ? 'Guten Morgen. Diese Zusammenfassung wird von einer synthetischen Stimme gesprochen.'
