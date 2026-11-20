@@ -1,0 +1,31 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #182622;
+  background: #f1f5f2;
+  line-height: 1.6;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 740px; margin: auto; padding: 42px 20px; }
+header { margin-bottom: 24px; }
+h1 { font-size: clamp(2.8rem, 8vw, 4.5rem); line-height: 1.05; margin: 8px 0; }
+h2 { line-height: 1.2; }
+.label { color: #355d50; font-weight: 700; letter-spacing: .1em; font-size: .8rem; }
+.card { background: white; border: 1px solid #d5e0da; border-radius: 20px; padding: clamp(18px, 4vw, 32px); }
+.badge { display: inline-block; margin: 0; padding: 4px 12px; background: #edf5ef; border-radius: 12px; }
+.audio-note { padding: 12px; background: #f2f5f3; border-radius: 8px; }
+ol { padding-left: 24px; }
+li + li { margin-top: 12px; border-top: 1px solid #d5e0da; }
+li p { margin-bottom: 4px; }
+a { display: block; color: #145b47; text-underline-offset: 3px; }
+
+form.card { margin-bottom: 20px; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.fields { display: grid; gap: 12px; margin: 12px 0; }
+label { display: block; font-weight: 600; }
+input, select, button { font: inherit; border-radius: 8px; padding: 8px 12px; }
+input, select { display: block; width: 100%; border: 1px solid #80988c; background: white; color: inherit; }
+button { background: #145b47; color: white; border: 0; cursor: pointer; margin-top: 12px; }
+button:disabled { opacity: .65; cursor: wait; }
+[role="alert"] { color: #982727; }
+audio { width: 100%; }
