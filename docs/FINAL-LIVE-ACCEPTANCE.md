@@ -1,6 +1,6 @@
 # Final acceptance · licensed Mac only
 
-**Current decision: NO-GO for a real-news demo.** No live calls or private editorial approvals came with this archive. Aim for three accepted **exact recordings**, not three green health checks. No generation is required to read this checklist.
+**This checklist predates the 21 November live tests.** Two exact real-news recordings (FX and Dutch AI) now passed the saved-edition technical gate; see [the current one-take status](ONE-TAKE-DEMO.md). Full human editorial approval and real-news Memory remain open. The custom German edition did not pass. The steps below remain the complete acceptance path, not a claim that all three editions are ready.
 
 ## 1 · Cold setup
 

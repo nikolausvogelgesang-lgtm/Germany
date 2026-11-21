@@ -2,6 +2,20 @@
 
 **Current live cost per published briefing: not measured.** Count articles once per intake, model work per generation request, TTS per new recording and delivery per play. A failed edition can still consume tokens or TTS characters. Presentation length alone is not a bill.
 
+The default writer is now `gpt-5.4` after a live FX script reached the evidence and audio gates with that model. The archived mini-writer illustration below is **not** a price estimate for the current default; use actual provider billing and the private per-edition usage log for the final cost figure.
+
+## Live two-listener demo, 21 November 2026
+
+The exact saved archive editions passed the private source/audio/profile gate on the 1,740-article export. The figures below use reported API usage and [GPT-5.4 standard token rates](https://developers.openai.com/api/docs/models/gpt-5.4) of $2.50 input / $15 output per million plus the [ElevenLabs Flash API rate](https://elevenlabs.io/pricing/api) of $0.05 per 1,000 characters. They are estimates, not a provider invoice; plans, taxes, data rights, retries and local infrastructure are excluded.
+
+| Edition | Model input / output tokens | New voice characters | Measured MP3 | Estimated provider cost |
+|---|---:|---:|---:|---:|
+| English FX | 7,100 / 1,124 | 1,130 | 76.2 s | $0.0911 |
+| Dutch AI | 6,510 / 1,587 | 1,673 | 126.9 s | $0.1237 |
+| **Two cold editions** | **13,610 / 2,711** | **2,803** | — | **$0.2148** |
+
+At 17,400 articles, the same two shortlisted edition workloads would still be about $0.2148 in model/voice usage; local intake work and licensing grow. Twenty equivalent cold editions would be about $2.15 in provider usage. Failed drafts also cost tokens, so use the billing dashboard for an actual paid-run total. A prepared recording can be replayed without another model or voice call.
+
 ## 1,740 vs 17,400 articles
 
 | Stage | Cost driver |

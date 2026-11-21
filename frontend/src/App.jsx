@@ -8,6 +8,22 @@ import {DateStamp, hasRecording, languageName, Player, Sentences, useRequestFocu
 
 const archive = '2026-11-19T23:59:59Z'
 const subjects = {'fx-trader': 'Currencies & central banks', 'dutch-ai-investor': 'AI & cloud'}
+const editionKey = (selected, listener, cutoff) => 'second-take-edition:' + JSON.stringify([selected, listener, cutoff])
+
+function savedEdition(key) {
+  try {
+    const result = JSON.parse(window.sessionStorage.getItem(key))
+    const audio = new URL(result?.audioUrl)
+    return result?.editionStatus === 'complete' && result?.qualityStatus === 'sufficient_verified_content' &&
+      Array.isArray(result.segments) && audio.origin === window.location.origin &&
+      /^\/api\/audio\/[a-f0-9]{24}\.mp3$/.test(audio.pathname) ? {...result, restoredFromSession: true} : null
+  } catch { return null }
+}
+
+function rememberEdition(key, result) {
+  if (!key || result?.editionStatus !== 'complete' || result?.qualityStatus !== 'sufficient_verified_content') return
+  try { window.sessionStorage.setItem(key, JSON.stringify(result)) } catch { /* storage is optional */ }
+}
 
 function scriptState(result) {
   if (!result.segments.length) return {label: 'No transcript available'}
@@ -94,7 +110,8 @@ function Production({result, selected}) {
 }
 
 function Daily({listener, selected, valid, active, cutoff, setCutoff}) {
-  const [result, setResult] = useState(null)
+  const key = cutoff ? editionKey(selected, listener, cutoff) : null
+  const [result, setResult] = useState(() => key ? savedEdition(key) : null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [preview, setPreview] = useState(false)
@@ -110,7 +127,7 @@ function Daily({listener, selected, valid, active, cutoff, setCutoff}) {
     setResult(null); setPreview(false); setError(''); setLoading(true)
     try {
       const data = await requestBriefing(listener, ctrl.signal, cutoff || undefined)
-      if (!ctrl.signal.aborted) setResult(data)
+      if (!ctrl.signal.aborted) { rememberEdition(key, data); setResult(data) }
     } catch (e) {
       if (!ctrl.signal.aborted) setError(e.message?.includes('six licensed feeds')
         ? 'The six licensed feeds are not connected. You can still open the fictional example below.'
@@ -148,7 +165,8 @@ function Daily({listener, selected, valid, active, cutoff, setCutoff}) {
         </p>
       </header>
       <div className="jacket-base" ref={resultRegion} tabIndex="-1" role="region" aria-label="Briefing audio">
-        {result ? <Player key={result.id || result.asOf} result={result} title={title} script={scriptState(result)}/>
+        {result ? <><Player key={result.id || result.asOf} result={result} title={title} script={scriptState(result)}/>
+            {result.restoredFromSession && <p className="saved-note">Previously prepared in this tab.</p>}</>
           : <div className="request-row">
               <div className={'request-state' + (loading ? ' busy' : '')} role="status">
                 <span>{state}</span>{note && <small>{note}</small>}

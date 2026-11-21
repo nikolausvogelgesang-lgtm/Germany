@@ -242,7 +242,7 @@ test('a successful retry reports generator and verifier tokens from both attempt
     assert.equal(result.generationMode, 'source-checked-model');
     assert.equal(attempts, 2);
     assert.equal(result.repairApplied, true);
-    assert.deepEqual(requestedModels, [process.env.OPENAI_MODEL || 'gpt-5.4-mini', process.env.OPENAI_REPAIR_MODEL || 'gpt-5.4']);
+    assert.deepEqual(requestedModels, [process.env.OPENAI_MODEL || 'gpt-5.4', process.env.OPENAI_REPAIR_MODEL || 'gpt-5.4']);
     assert.deepEqual(result.usage, {
       modelInputTokens: 4, modelOutputTokens: 4,
       verifierInputTokens: 2, verifierOutputTokens: 2,

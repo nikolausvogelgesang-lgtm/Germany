@@ -1,4 +1,6 @@
-# Release desk · Second Take
+# Release desk · Second Take (historical audit)
+
+This audit records the earlier archive assessment. The [current two-edition demo status](ONE-TAKE-DEMO.md) and README supersede its live-readiness snapshot.
 ## Intake assessment — recorded before implementation changes
 
 Starting point: uploaded second-take-LATEST-COMPLETE.zip, SHA-256 `aba6f91406e3274fa673a3c157103ba40dca43602c9b8393e7ff6775b335f4ed`. Untouched input, separate extraction and working tree. Linux, Node 22.16.0. No service secrets, licensed articles, ledger, installed project packages or generated editions supplied. All probes used authored fixtures or a local codec, never the public providers.
