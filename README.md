@@ -1,48 +1,49 @@
 # Second Take
 
-Second Take turns licensed financial news into personalized audio briefings. The browser shows the transcript with source links next to the corresponding claims. The voice is AI-generated. Briefings are not investment advice.
+**Don’t repeat the news. Tell me what’s changed.**
 
-## What works
+- **Today’s briefing:** choose **FX trader**, **Dutch AI investor**, or set your own topics, language, depth and time limit. Generate once, play the recording, and open the numbered link beside a spoken sentence. The default window is a dated **archive**, not today’s live market.
+- **What’s changed:** open an earlier edition of **one editor-curated story**, listen and explicitly mark it heard. The later edition speaks only unacknowledged developments. Playing audio does not change history.
 
-- Two listener presets: **FX trader** (English, FX and central banks, brief, up to 2 minutes) and **Dutch AI investor** (Dutch, AI and cloud, brief, up to 1.5 minutes).
-- A custom listener can choose English, German or Dutch, enter topics, select a depth and set a time limit. Generating a briefing sends a fresh API request.
-- The UI plays the returned MP3 when audio is available. It labels headline fallback and general-news fallback explicitly. The fictional UI example is separate from live briefings and has no audio.
-- Returning-listener memory is not implemented. Joint browser verification of live MP3 playback is still pending.
+**Release decision: NOT READY for a real-news jury demonstration.** The three scenarios work on fictional feeds with mock models and locally decoded narration. No licensed daily edition, live provider recording or approved Nvidia timeline has been certified here. [Audit and evidence](docs/JURY-RELEASE-AUDIT.md) · [Mac acceptance, one generation per listener](docs/FINAL-LIVE-ACCEPTANCE.md) · [Demo runbook](docs/DEMO-RUNBOOK.md).
 
 ## Run locally
 
-Use Node.js 22 or newer. Run the backend and frontend on the same laptop for the demo. A public clone does not contain the six private Newstex JSONL feeds or the service credentials.
-
-**Terminal 1 — backend.** Before starting, set the backend environment variables in this terminal session using your team's private configuration:
-
-- `NEWSTEX_DATA_DIR`
-- `OPENAI_API_KEY`, `OPENAI_MODEL`
-- `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL`
-- `PORT`
-
-Keep credentials server-side. The default frontend development proxy expects the backend at `http://localhost:3001`.
-
-From the repository root:
+macOS, Node 22.16+ (22.x) or 24.x, npm. From the extracted `second-take/` directory:
 
 ```sh
-cd backend
-npm start
+umask 077
+test -f .env || cp .env.example .env
+npm --prefix frontend ci --no-audit --no-fund
+npm --prefix frontend run lint && npm --prefix frontend run build
+npm --prefix backend test
+node --test tests/history.test.mjs
+npm --prefix backend start
 ```
 
-**Terminal 2 — frontend.** From the repository root:
+Second terminal, same directory:
 
 ```sh
-cd frontend
-npm ci
-npm run dev
+npm --prefix frontend run preview -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-Open the local URL printed by Vite. To check the production build, run `npm run build` from `frontend/`. `VITE_API_BASE_URL` can override the browser's API base; it is public configuration, not a place for credentials.
+Open **http://127.0.0.1:5173**. Vite dev and preview proxy `/api` to the loopback backend on port 3001. For development use `npm --prefix frontend run dev -- --host 127.0.0.1 --port 5173` instead of preview. Backend has no npm dependencies. Frontend needs the locked packages on the machine or in its approved registry/cache. New audio admission uses the system decoder: stock `/usr/bin/afconvert` on macOS; local FFmpeg on Linux.
 
-## Try the demo
+## Private operating modes
 
-Select **FX trader**, generate a briefing, play the MP3 if available, and open a source link next to a transcript sentence. Switch to **Dutch AI investor** to compare the coverage. Then enter a new custom profile and generate its briefing live. A labelled fallback or an unavailable audio message is not a successful live audio test.
+Only the backend and operator CLIs load the project-root `.env`. Restart after changes. No keys in the browser, commands, screenshots or `VITE_*` variables.
 
-## Data and limitations
+| Inputs | Result |
+|---|---|
+| No feeds, ledger or keys | No fictional substitution for daily news. Explicitly labelled fictional Memory rehearsal, citations, mark/reset; no voice without a matching admitted cache. |
+| Six authorized Newstex files in `NEWSTEX_DATA_DIR` | Rank and group the eligible seven-day window. No topic match → no job. Without model access, only matching native headlines, if available, explicitly transcript-only. |
+| Feeds + authorized OpenAI + ElevenLabs | Bounded drafting, separate claim verification, conditional reverified repair. Only a sufficient script can request TTS. Failed voice or delivery gates leave the transcript, not a “complete” edition. |
+| Approved private ledger + referenced originals | The approved two-edition Memory track; not automatic memory for arbitrary daily stories. A configured invalid ledger disables Memory, not daily news. |
 
-Keep licensed article bodies, API keys, private audit logs and generated MP3s out of Git. The frontend links to publisher sources without displaying full article bodies. Automated checks do not replace editorial verification against the original sources.
+Default daily: 3-minute **maximum**; 140 independently accepted factual words minimum, prefer 180–300 when supported. Require multiple verified events when eligible evidence supports them. The delivered MP3 must measure **60–180 seconds**, without padding the script or truncating a claim. Shorter explicit caps and short new-only continuations are supported. See [evidence and audio gates](docs/DAILY-EVIDENCE.md) and [API contract](shared/CONTRACT.md).
+
+The three listener slots keep their current results **in this tab’s memory**: switching listeners stops the player, not the purchase. Reload, changing window or changing Custom settings can discard a result. Heard IDs persist per listener/story in browser storage. Use **Production details → Save private review copy** for a read-only audit of the exact daily edition; this is not a public distribution or re-import feature.
+
+`generated/` contains private local usage, audit records and admitted audio/receipts. Exclude it, saved editions, private editorial files, feeds and secrets from any distribution. Only use providers and material authorized under the licence; delete derived artifacts according to retention requirements.
+
+[Publisher pitch](docs/PUBLISHER-PITCH.md) · [1,740 vs 17,400 articles: costs and CPU](backend/MEASUREMENTS.md) · [Private Memory approval](docs/MEMORY.md) · [Final claim review](docs/EDITORIAL-CHECK.md)

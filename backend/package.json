@@ -7,6 +7,7 @@
     "start": "node src/server.mjs",
     "test": "node --test",
     "smoke": "node scripts/smoke.mjs",
+    "preflight": "node scripts/preflight.mjs",
     "profile-gate": "node scripts/profile-gate.mjs",
     "memory-candidate": "node scripts/check-memory-candidate.mjs"
   }
