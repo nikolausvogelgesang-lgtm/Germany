@@ -1,25 +1,9 @@
-# Second Take — demo runbook
+# At the listening desk
 
-## Before the demo
+**Before the jury:** complete the [Mac setup, private preflight and one-POST-per-listener acceptance](FINAL-LIVE-ACCEPTANCE.md). Stage the three audited results in a single tab, same archive cutoff, same origin. Keep the tab open and the backend running. The saved review JSONs are for audit, not reheatable editions.
 
-Run Vite and the configured backend on the same laptop. Confirm that the API loads the licensed feeds and that a real briefing plays in the browser. Use the live briefing controls, not the fictional UI example. Do not merge or present the audio path as verified until the joint browser test passes.
+**On stage:** follow the [90-second sequence](FINAL-LIVE-ACCEPTANCE.md#5--90-seconds-on-stage). Switch listener instead of clicking Generate again. Each sentence’s numbered citation opens its own original. If showing merged coverage, choose a story whose separate claims actually use complementary originals; `clusterForReview:null` means there is no such exhibit in that edition.
 
-## 60-second browser walkthrough
+**Memory:** use the timeline language actually shown (listener switches change history, not the editor’s wording). Play → explicitly mark → next cutoff → listen only to the new development → mark → silence. Reset affects only this story and listener. A fictional rehearsal announces itself on screen and in the recording; it is not a real-news approval.
 
-| Time | Action |
-| --- | --- |
-| 0–20 s | Choose **FX trader** and generate. Play a short excerpt when the MP3 is ready. Open one publisher link next to a factual sentence and show how the article supports that sentence. |
-| 20–40 s | Choose **Dutch AI investor** and generate. Play a short Dutch excerpt and point out a different story or source, not just a different voice. |
-| 40–60 s | Choose **Custom listener**. Select German and enter an energy topic live, ideally one suggested by the jury. Choose **Brief**, set the limit to **2 minutes**, and click **Generate briefing**. Show the loading state, then play the returned MP3 when ready. |
-
-If generation runs past the minute, finish the wildcard playback in the judge interaction. If there is no clear topic match, point out the general-news fallback. If headline fallback is used, identify it as attributed headlines. If audio fails, say so; do not substitute a recording and call it live.
-
-## 30-second pitch
-
-> Financial news moves quickly, but a general roundup makes listeners sift through stories that aren't relevant to them. Second Take turns licensed reporting into a short audio briefing tailored to the listener, with a source next to each factual claim. A financial newsroom could review the evidence before publishing different briefings from the same reporting. The voice is AI-generated and clearly disclosed. Updates for returning listeners are a future feature, not part of this demo.
-
-## Cost and scale — if asked
-
-- **Measured locally:** parsing 1,740 articles took 142 ms in one run. Grouping took 106–113 ms in two runs of the earlier grouping version. That local processing used no model or TTS calls.
-- **Measured synthetic stress test:** grouping 17,400 synthetic records took 3,866 ms in one run of the earlier version. This is a runtime result, not a test of clustering quality on 17,400 independent articles.
-- **Estimated API cost:** use the measured tokens and new TTS characters with the list-rate assumptions in [Backend measurements](../backend/MEASUREMENTS.md). Paid usage depends on the number and length of briefings, retries, and cache hits. The recorded Dutch cache hit had zero new TTS characters; that is not the cost of a fresh Dutch edition. Do not quote the older per-edition estimates as current prices.
+**If something fails:** Retry playback fetches the same bytes. Generate again may spend money and produces a different edition requiring new review. An unverified cache is not evidence; withhold it. Do not regenerate on stage to chase the clock. Report what was pre-generated, what was played, and what remains blocked.

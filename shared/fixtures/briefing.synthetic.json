@@ -15,7 +15,7 @@
         {
           "articleId": "synthetic-article-1",
           "title": "Fictional source for interface testing",
-          "url": "https://example.com/fictional-source"
+          "url": "/example-source.txt"
         }
       ]
     }

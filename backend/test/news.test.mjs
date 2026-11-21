@@ -83,3 +83,21 @@ test('Dutch AI and cloud listener prioritizes AI-cloud growth over a generic AI 
   assert.equal(ranked[0].articles[0].id, 'baidu');
   assert.equal(ranked[0].topicHits, 2);
 });
+
+test('translation pairs need one identifiable author/time candidate, never just the nearest ambiguous report', () => {
+  const pair = article('de','Prüfbericht','2026-11-18T10:05:00Z',{language:'de',feed:'invezz_de.jsonl'});
+  const one = article('en','Test story','2026-11-18T10:01:00Z');
+  const two = article('another','Different test','2026-11-18T10:02:00Z');
+  assert.equal(groupArticles([pair,one,two]).diagnostics.translationAmbiguous,1);
+  assert.equal(groupArticles([pair,one,two]).groups.length,3);
+  assert.equal(groupArticles([pair,one].map(a=>({...a,author:''}))).groups.length,2);
+});
+
+test('exact syndicated copies share one event while a separate update keeps its own evidence',()=>{
+  const time='2026-11-18T10:00:00Z';
+  const rows=[article('notice','Harbour issues a notice',time), article('wire','Morning shipping digest',time), article('next','Dock workers approve new schedule',time)];
+  rows[0].text='Invented port notice for a grouping test.';rows[1].text=rows[0].text;
+  const {groups,diagnostics}=groupArticles(rows);
+  assert.equal(diagnostics.exactDuplicates,1);
+  assert.deepEqual(groups.map(g=>g.map(a=>a.id)),[['notice','wire'],['next']]);
+});

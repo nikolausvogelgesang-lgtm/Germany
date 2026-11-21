@@ -1,0 +1,24 @@
+{
+  "storyId": "sample-tideglass-crossing",
+  "title": "The Tideglass crossing",
+  "language": "en",
+  "editions": ["2026-11-16T18:00:00Z", "2026-11-17T18:00:00Z"],
+  "updates": [
+    {
+      "updateId": "inspection-suspends-freight",
+      "spokenText": "Tideglass Port suspended freight crossings while engineers inspected its loading ramp.",
+      "articleId": "sample-port-notice",
+      "publishedAt": "2026-11-16T08:15:00Z",
+      "sourceTitle": "Service notice · Tideglass Port",
+      "evidenceQuote": "Freight crossings at Tideglass Port are suspended while engineers inspect the loading ramp."
+    },
+    {
+      "updateId": "freight-service-resumes",
+      "spokenText": "Freight crossings at Tideglass Port have resumed after engineers cleared the ramp for use.",
+      "articleId": "sample-port-clearance",
+      "publishedAt": "2026-11-17T11:30:00Z",
+      "sourceTitle": "Reopening notice · Tideglass Port",
+      "evidenceQuote": "Engineers have cleared the ramp for use, and freight crossings at Tideglass Port have resumed."
+    }
+  ]
+}
